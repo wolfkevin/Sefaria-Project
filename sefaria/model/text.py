@@ -21,6 +21,7 @@ except ImportError:
 from . import abstract as abst
 from schema import deserialize_tree, SchemaNode, JaggedArrayNode, TitledTreeNode, AddressTalmud, TermSet, TitleGroup
 
+from sefaria.system.database import db
 import sefaria.system.cache as scache
 from sefaria.system.exceptions import InputError, BookNameError, PartialRefInputError
 from sefaria.utils.talmud import section_to_daf, daf_to_section
@@ -765,6 +766,54 @@ class Version(abst.AbstractMongoRecord, AbstractTextRecord, AbstractSchemaConten
     def __repr__(self):  # Wanted to use orig_tref, but repr can not include Unicode
         return u"{}().load({{'title': '{}', 'versionTitle': '{}'}})".format(self.__class__.__name__, self.title, self.versionTitle)
 
+    def load_with_pipeline(self, oref, lang, vtitle):
+
+        if not (oref and lang and vtitle):
+            raise Exception("Version.load_with_pipeline() works on a Ref, and a single Version and requires a ref, language, and version title.")
+
+        result = getattr(db, self.collection).aggregate(self.__pipeline(oref, lang, vtitle))["result"]
+
+        if len(result) == 1:
+            projection = {j:1 for j in self.required_attrs + self.optional_attrs if j != self.content_attr}
+            self.load({"title": oref.index.title, "language": lang, "versionTitle": vtitle}, projection)
+            setattr(self, self.content_attr, result[0]["txt"])
+            return self
+        elif len(result) == 0:
+            return None
+        else:
+            raise Exception("Version.load_with_pipeline return too many results.")
+
+    def __pipeline(self, oref, lang, vtitle):
+        """
+        This logic only works with a single record, currently.
+        :param lang:
+        :param vtitle:
+        :return:
+        """
+        match = {"title": oref.index.title, "language": lang, "versionTitle": vtitle}
+        project = {"txt": "$" + oref.storage_address()}
+        pipeline = [{"$match": match}, {"$project": project}]
+
+        range_index = oref.range_index()
+        for i in range(len(oref.sections)):
+            if range_index > i:  # Select one element
+                pipeline += [
+                    {"$unwind": "$txt"},
+                    {"$skip": oref.sections[i] - 1},
+                    {"$limit": 1},
+                    {"$group": {"_id": "$_id", "txt": {"$last": "$txt"}}}
+                ]
+            elif range_index == i:
+                pipeline += [
+                    {"$unwind": "$txt"},
+                    {"$skip" : oref.sections[i] - 1},
+                    {"$limit" : oref.toSections[i] - oref.sections[i] + 1},
+                    {"$group": {"_id": "$_id", "txt": {"$push": "$txt"}}}
+                ]
+                break
+
+        return pipeline
+
     def _validate(self):
         assert super(Version, self)._validate()
         """
@@ -794,8 +843,41 @@ class VersionSet(abst.AbstractMongoSet):
     """
     recordClass = Version
 
-    def __init__(self, query={}, page=0, limit=0, sort=[["priority", -1], ["_id", 1]], proj=None):
-        super(VersionSet, self).__init__(query, page, limit, sort, proj)
+    def __init__(self, query={}, page=0, limit=0, sort=[["priority", -1], ["_id", 1]], proj=None, map_reduce=False, trim_oref=None):
+        if not map_reduce:
+            super(VersionSet, self).__init__(query, page, limit, sort, proj)
+            return
+
+        if not trim_oref:
+            raise Exception("VersionSet() map_reduce option requires a Ref")
+
+        from bson.code import Code
+        mapper_template = """ function() {{
+                this.chapter = this.{};
+                range_index = {};
+                sections = {};
+                toSections = {};
+                for (i = 0; i < sections.length; i++) {{
+                    if (range_index > i) {{
+                        this.chapter = this.chapter[sections[i] - 1]
+                    }}
+                    else if (range_index == i) {{
+                        this.chapter = this.chapter.slice(sections[i] - 1, toSections[i] - sections[i] + 1)
+                    }}
+                }}
+                emit(this._id, this);
+            }} """
+        mapper = Code(mapper_template.format(trim_oref.storage_address(), trim_oref.range_index(), trim_oref.sections, trim_oref.toSections))
+        reducer = Code(""" function(key, value) {
+           return value;
+        } """)
+
+        raw_reduction = getattr(db, self.recordClass.collection).map_reduce(mapper, reducer, { "inline": 1 }, query = query, jsMode=True, verbose=False) # sort = sort)
+        self.raw_records = self.records = [self.recordClass(attrs=r["value"]) for r in raw_reduction["results"]]
+        self.max = len(self.records)
+        self.current = 0
+        self._local_iter = None
+
 
     def word_count(self):
         return sum([v.word_count() for v in self])
@@ -871,7 +953,7 @@ def merge_texts(text, sources):
 
 class TextChunk(AbstractTextRecord):
     """
-    A chunk of text coresponding to the provided :class:`Ref`, language, and optionall version name.
+    A chunk of text corresponding to the provided :class:`Ref`, language, and optionally version name.
     If it is possible to get a more complete text by merging multiple versions, a merged result will be returned.
 
     :param oref: :class:`Ref`
@@ -880,7 +962,7 @@ class TextChunk(AbstractTextRecord):
     """
     text_attr = "text"
 
-    def __init__(self, oref, lang="en", vtitle=None):
+    def __init__(self, oref, lang="en", vtitle=None, agg=False, mr=False):
         """
         :param oref:
         :type oref: Ref
@@ -904,32 +986,91 @@ class TextChunk(AbstractTextRecord):
 
         if lang and vtitle:
             self._saveable = True
-            v = Version().load({"title": oref.index.title, "language": lang, "versionTitle": vtitle}, oref.part_projection())
-            if v:
-                self._versions += [v]
-                self.text = self._original_text = self.trim_text(v.content_node(oref.index_node))
+            if agg:
+                v = Version().load_with_pipeline(self._oref, lang, vtitle)
+                if v:
+                    self._versions += [v]
+                    self.text = self._original_text = self.trim_pipeline_text(getattr(v, v.content_attr))
+            else:
+                v = Version().load({"title": oref.index.title, "language": lang, "versionTitle": vtitle}, oref.part_projection())
+                if v:
+                    self._versions += [v]
+                    self.text = self._original_text = self.trim_text(v.content_node(oref.index_node))
         elif lang:
-            vset = VersionSet(oref.condition_query(lang), proj=oref.part_projection())
-
-            if vset.count() == 0:
-                return
-            if vset.count() == 1:
-                v = vset[0]
-                self._versions += [v]
-                self.text = self.trim_text(v.content_node(oref.index_node))
-                #todo: Should this instance, and the non-merge below, be made saveable?
-            else:  # multiple versions available, merge
-                merged_text, sources = vset.merge(oref.index_node)  #todo: For commentaries, this merges the whole chapter.  It may show up as merged, even if our part is not merged.
-                self.text = self.trim_text(merged_text)
-                if len(set(sources)) == 1:
-                    for v in vset:
-                        if v.versionTitle == sources[0]:
-                            self._versions += [v]
-                            break
+            if agg:
+                #Check for number of sources first
+                vset = VersionSet(oref.condition_query(lang), proj={"versionTitle":1})
+                if vset.count() == 0:
+                    return
+                if vset.count() == 1:
+                    v = Version().load_with_pipeline(self._oref, lang, vset[0].versionTitle)
+                    self._versions += [v]
+                    self.text = self.trim_pipeline_text(getattr(v, v.content_attr))
                 else:
-                    self.sources = sources
-                    self.is_merged = True
-                    self._versions = vset.array()
+                    full_versions = []
+                    texts = []
+                    sources = []
+
+                    for v in vset:
+                        fullv = Version().load_with_pipeline(self._oref, lang, v.versionTitle)
+                        full_versions.append(fullv)
+                        texts.append(getattr(fullv, fullv.content_attr))
+                        sources.append(fullv.versionTitle)
+                    merged_text, merged_sources = merge_texts(texts, sources)
+                    self.text = self.trim_pipeline_text(merged_text)
+                    if len(set(sources)) == 1:
+                        for v in full_versions:
+                            if v.versionTitle == sources[0]:
+                                self._versions += [v]
+                                break
+                    else:
+                        self.sources = merged_sources
+                        self.is_merged = True
+                        self._versions = full_versions
+            elif mr:
+                vset = VersionSet(oref.condition_query(lang), map_reduce=True, trim_oref=self._oref)
+
+                if vset.count() == 0:
+                    return
+                if vset.count() == 1:
+                    v = vset[0]
+                    self._versions += [v]
+                    self.text = self.trim_pipeline_text(v.chapter)
+                    #todo: Should this instance, and the non-merge below, be made saveable?
+                else:  # multiple versions available, merge
+                    merged_text, sources = vset.merge()  #todo: For commentaries, this merges the whole chapter.  It may show up as merged, even if our part is not merged.
+                    self.text = self.trim_pipeline_text(merged_text)
+                    if len(set(sources)) == 1:
+                        for v in vset:
+                            if v.versionTitle == sources[0]:
+                                self._versions += [v]
+                                break
+                    else:
+                        self.sources = sources
+                        self.is_merged = True
+                        self._versions = vset.array()
+            else:
+                vset = VersionSet(oref.condition_query(lang), proj=oref.part_projection())
+
+                if vset.count() == 0:
+                    return
+                if vset.count() == 1:
+                    v = vset[0]
+                    self._versions += [v]
+                    self.text = self.trim_text(v.content_node(oref.index_node))
+                    #todo: Should this instance, and the non-merge below, be made saveable?
+                else:  # multiple versions available, merge
+                    merged_text, sources = vset.merge(oref.index_node)  #todo: For commentaries, this merges the whole chapter.  It may show up as merged, even if our part is not merged.
+                    self.text = self.trim_text(merged_text)
+                    if len(set(sources)) == 1:
+                        for v in vset:
+                            if v.versionTitle == sources[0]:
+                                self._versions += [v]
+                                break
+                    else:
+                        self.sources = sources
+                        self.is_merged = True
+                        self._versions = vset.array()
         else:
             raise Exception("TextChunk requires a language.")
 
@@ -1078,6 +1219,30 @@ class TextChunk(AbstractTextRecord):
                 )
 
     #maybe use JaggedArray.subarray()?
+    def trim_pipeline_text(self, txt):
+        """
+        Trims a text loaded with Version.load_from_pipeline() to specifications of self._oref
+        :param txt:
+        :return:
+        """
+        range_index = self._oref.range_index()
+        sections = self._oref.sections
+        toSections = self._oref.toSections
+
+        if not sections:
+            pass
+        if range_index + 1 >= len(sections): # Simple ranges were handled already
+            pass
+        for i in range(0, self._ref_depth):
+            if range_index < i:
+                begin = end = txt
+                for _ in range(range_index, i - 1):
+                    begin = begin[0]
+                    end = end[-1]
+                begin[0] = begin[0][sections[i] - 1:]
+                end[-1] = end[-1][:toSections[i]]
+        return txt
+
     def trim_text(self, txt):
         """
         Trims a text loaded from Version record with self._oref.part_projection() to the specifications of self._oref

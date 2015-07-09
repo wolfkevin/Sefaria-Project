@@ -67,7 +67,6 @@ class AbstractMongoRecord(object):
         del attrs[self.id_field]
         return self.__class__(copy.deepcopy(attrs))
 
-
     def load_from_dict(self, d, is_init=False):
         """
         Add values from a dict to an existing object.
@@ -282,7 +281,7 @@ class AbstractMongoSet(collections.Iterable):
             self.max = len(self.records)
 
     def __len__(self):
-        if self.max:
+        if self.max is not None:
             return self.max
         else:
             return self.raw_records.count()
