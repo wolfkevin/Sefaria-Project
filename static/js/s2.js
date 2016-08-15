@@ -1522,6 +1522,7 @@ var ReaderPanel = React.createClass({
     onNavTextClick: React.PropTypes.func,
     onRecentClick: React.PropTypes.func,
     onSearchResultClick: React.PropTypes.func,
+    onOpenConnectionsClick: React.PropTypes.func,
     onUpdate: React.PropTypes.func,
     closePanel: React.PropTypes.func,
     closeMenus: React.PropTypes.func,
@@ -1666,7 +1667,11 @@ var ReaderPanel = React.createClass({
     }
   },
   handleTextListClick: function handleTextListClick(ref) {
-    this.showBaseText(ref);
+    if (this.state.mode === "TextAndConnections") {
+      this.showBaseText(ref);
+    } else {
+      this.props.onCitationClick(ref);
+    }
   },
   setHeadroom: function setHeadroom() {
     if (this.props.multiPanel) {
