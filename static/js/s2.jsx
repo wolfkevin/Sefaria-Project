@@ -1425,7 +1425,7 @@ var Header = React.createClass({
                              <span className="int-he">התחבר</span>
                            </a>
                          </div>);
-    var langSearchPlaceholder = this.props.interfaceLang == 'english' ? "Search" : "הקלד לחיפוש";
+    var langSearchPlaceholder = this.props.interfaceLang == 'english' ? "XSearch" : "הקלד לחיפוש";
     var vkClassActivator = this.props.interfaceLang == 'english' ? " keyboardInput" : "";
     return (<div className="header">
               <div className="headerInner">

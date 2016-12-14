@@ -2796,7 +2796,7 @@ var ReaderNavigationMenu = React.createClass({
         React.createElement(ReaderNavigationMenuCloseButton, { onClick: this.closeNav }),
         React.createElement(ReaderNavigationMenuSearchButton, { onClick: this.handleSearchButtonClick }),
         React.createElement(ReaderNavigationMenuDisplaySettingsButton, { onClick: this.props.openDisplaySettings }),
-        React.createElement('input', { className: 'readerSearch', placeholder: 'Search', onKeyUp: this.handleSearchKeyUp })
+        React.createElement('input', { className: 'readerSearch', placeholder: 'XSearch', onKeyUp: this.handleSearchKeyUp })
       );
       topContent = this.props.hideNavHeader ? null : topContent;
 
