@@ -169,6 +169,7 @@ var ReaderApp = React.createClass({
     }
     // Set S2 cookie, putting user into S2 mode site wide
     cookie("s2", true, {path: "/"});
+    alert("cache test");
   },
   componentWillUnmount: function() {
     window.removeEventListener("popstate", this.handlePopState);
@@ -1425,7 +1426,7 @@ var Header = React.createClass({
                              <span className="int-he">התחבר</span>
                            </a>
                          </div>);
-    var langSearchPlaceholder = this.props.interfaceLang == 'english' ? "XSearch" : "הקלד לחיפוש";
+    var langSearchPlaceholder = this.props.interfaceLang == 'english' ? "Search" : "הקלד לחיפוש";
     var vkClassActivator = this.props.interfaceLang == 'english' ? " keyboardInput" : "";
     return (<div className="header">
               <div className="headerInner">

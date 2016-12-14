@@ -178,6 +178,7 @@ var ReaderApp = React.createClass({
     }
     // Set S2 cookie, putting user into S2 mode site wide
     cookie("s2", true, { path: "/" });
+    alert("cache test");
   },
   componentWillUnmount: function componentWillUnmount() {
     window.removeEventListener("popstate", this.handlePopState);
@@ -2796,7 +2797,7 @@ var ReaderNavigationMenu = React.createClass({
         React.createElement(ReaderNavigationMenuCloseButton, { onClick: this.closeNav }),
         React.createElement(ReaderNavigationMenuSearchButton, { onClick: this.handleSearchButtonClick }),
         React.createElement(ReaderNavigationMenuDisplaySettingsButton, { onClick: this.props.openDisplaySettings }),
-        React.createElement('input', { className: 'readerSearch', placeholder: 'XSearch', onKeyUp: this.handleSearchKeyUp })
+        React.createElement('input', { className: 'readerSearch', placeholder: 'Search', onKeyUp: this.handleSearchKeyUp })
       );
       topContent = this.props.hideNavHeader ? null : topContent;
 
