@@ -117,7 +117,7 @@ body.dark {
   box-shadow: none;
   color: black;
   font-size:  18px;
-  font-family: "adobe-garamond-pro", Georgia, serif;
+  font-family: "Cormorant Garamond", Georgia, serif;
   vertical-align: 1px;
   margin: 0;
 }
@@ -313,7 +313,7 @@ body.dark {
   border: 1px solid #aaa;
   border-top: 1px solid #ddd;
   z-index: 1002 !important;
-  font-family: "adobe-garamond-pro", Georgia, serif;
+  font-family: "Cormorant Garamond", Georgia, serif;
 }
 .ui-autocomplete .ui-menu-item a {
   padding: 4px 12px;
@@ -349,7 +349,7 @@ body.dark {
   height: 100%;
   overflow: hidden;
   background-color: inherit;
-  font-family: "adobe-garamond-pro", "Cormorant Garamond", Georgia, serif;
+  font-family: "Cormorant Garamond", Georgia, serif;
 }
 .readerContent {
   width: 100%;
@@ -586,7 +586,7 @@ body.dark {
   border: none;
   background-color: inherit;
   font-size: 18px;
-  font-family: "adobe-garamond-pro", Georgia;
+  font-family: "Cormorant Garamond", Georgia;
   height: 48px;
   margin-top: 9px;
 }
@@ -650,11 +650,11 @@ h1 div.languageToggle .en {
   font-weight: normal;
 }
 h1 .languageToggle .he {
-  font-family: "adobe-garamond-pro", Georgia, serif;
+  font-family: "Cormorant Garamond", Georgia, serif;
   font-size: 22px;
 }
 .readerNavMenu h1 .int-en {
-  font-family: "adobe-garamond-pro", Georgia, serif;
+  font-family: "Cormorant Garamond", Georgia, serif;
 }
 .readerNavMenu h1 .int-he {
   font-family: "Taamey Frank", "Times New Roman", serif;
@@ -743,7 +743,7 @@ a.resourcesLink {
 .readerNavCategory {
   background-color: white;
   text-transform: uppercase;
-  font-family: "adobe-garamond-pro", Georgia;
+  font-family: "Cormorant Garamond", Georgia;
   text-align: center;
   font-size: 15px;
   padding: 0 10px;
@@ -2794,7 +2794,7 @@ a.resourcesLink {
   outline: none;
   box-sizing: border-box;
   font-size: 18px;
-  font-family: "adobe-garamond-pro", Georgia, serif;
+  font-family: "Cormorant Garamond", Georgia, serif;
   margin-bottom: 10px
 }
 .addNotePanel .noteSharingToggle {
@@ -3054,15 +3054,15 @@ a .button:hover {
 }
 ::-webkit-input-placeholder {
    font-style: italic;
-   font-family: "adobe-garamond-pro", Georgia, serif;
+   font-family: "Cormorant Garamond", Georgia, serif;
 }
 ::-moz-placeholder { 
    font-style: italic;
-   font-family: "adobe-garamond-pro", Georgia, serif;
+   font-family: "Cormorant Garamond", Georgia, serif;
 }
 :-ms-input-placeholder {  
    font-style: italic;
-   font-family: "adobe-garamond-pro", Georgia, serif;
+   font-family: "Cormorant Garamond", Georgia, serif;
 }
 input {
   outline: none;
@@ -3210,7 +3210,7 @@ h2.splitHeader .he {
 }
 
 .sheet.userSheet .sheetTitle  {
-   font-family: "adobe-garamond-pro", Georgia, serif;
+   font-family: "Cormorant Garamond", Georgia, serif;
    font-size: 20px;
    color:#333;
    margin-bottom: 6px;

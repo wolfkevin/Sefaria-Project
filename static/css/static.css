@@ -17,7 +17,7 @@
   color: #333333;
   font-size: 15px;
   background-color: #F9F9F7;
-  font-family: "adobe-garamond-pro", Georgia, serif;
+  font-family: "Cormorant Garamond", Georgia, serif;
 }
 .static .inner {
   width: 90%;
@@ -26,7 +26,7 @@
   padding: 124px 0 100px;
 }
 .static .int-en {
-  font-family: "adobe-garamond-pro", Georgia, serif;
+  font-family: "Cormorant Garamond", Georgia, serif;
 }
 .static .int-he {
   font-family: "Alef", "Helvetica Neue", Helvetica, Ariel, san-serif;
@@ -195,7 +195,7 @@
   background-color: transparent;
 }
 /*#homePage .int-en {
-  font-family: "adobe-garamond-pro", Georgia, serif;  
+  font-family: "Cormorant Garamond", "Cormorant Garamond", Georgia, serif;  
 }
 #homePage .int-he {
   font-family: "Alef", "Helvetica Neue", Helvetica, Ariel, san-serif;
@@ -334,7 +334,7 @@
   margin: 0 auto;
 }
 #homePage h1 .int-en, #homePage h2 .int-en{
-    font-family: "adobe-garamond-pro", Georgia, serif;
+    font-family: "Cormorant Garamond", "Cormorant Garamond", Georgia, serif;
 }
 #homePage h1 .int-he, #homePage h2 .int-he{
     font-family: "Alef", "Helvetica Neue", Helvetica, Ariel, san-serif;
@@ -621,7 +621,7 @@
   font-weight: normal;
 }
 #activityList .text.int-en, #activityList .text{
-  font-family: "adobe-garamond-pro", Georgia, serif;
+  font-family: "Cormorant Garamond", "Cormorant Garamond", Georgia, serif;
 }
 #activityList .text.int-he{
   font-family: "Taamey Frank", "Times New Roman", serif;
@@ -650,7 +650,7 @@
 }
 
 .registrationContent h1 .int-en{
-  font-family: "adobe-garamond-pro", Georgia, serif;
+  font-family: "Cormorant Garamond", "Cormorant Garamond", Georgia, serif;
 }
 .registrationContent h1 .int-he{
   font-family: "Alef", "Helvetica Neue", Helvetica, Ariel, san-serif;
@@ -1200,7 +1200,7 @@
     pointer-events: none;
 }
 #activityPage h2{
-  font-family: "adobe-garamond-pro", Georgia, serif;
+  font-family: "Cormorant Garamond", "Cormorant Garamond", Georgia, serif;
   font-size: 25px;
   font-style: italic;
   color: #aaa;
@@ -1224,7 +1224,7 @@
   font-weight: normal;
 }
 #activityPage #activityFeed .text.ver-en {
-  font-family: "adobe-garamond-pro", Georgia, serif;
+  font-family: "Cormorant Garamond", "Cormorant Garamond", Georgia, serif;
 }
 #activityPage #activityFeed .text.ver-he {
   font-family: "Taamey Frank", "Times New Roman", serif;
@@ -1510,7 +1510,7 @@
   font-family: 'Taamey Frank', 'Times New Roman', serif;
 }
 #visualGardenPage .int-en {
-  font-family: "adobe-garamond-pro", Georgia, serif;
+  font-family: "Cormorant Garamond", Georgia, serif;
 }
 #visualGardenPage h1 {
   font-size: 36px;
