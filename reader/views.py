@@ -2041,6 +2041,7 @@ def name_api(request, name):
             "is_range": ref.is_range(),
             "type": "ref",
             "ref": ref.normal(),
+            "url": ref.url(),
             "index": ref.index.title,
             "book": ref.book,
             "internalSections": ref.sections,

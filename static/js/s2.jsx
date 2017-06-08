@@ -3097,8 +3097,7 @@ var ReaderTextTableOfContents = React.createClass({
   },
   getData: function() {
     // Gets data about this text from cache, which may be null.
-    var data = Sefaria.text(this.getDataRef(), {context: 1, version: this.props.version, language: this.props.versionLanguage});
-    return data; 
+    return Sefaria.text(this.getDataRef(), {context: 1, version: this.props.version, language: this.props.versionLanguage});
   },
   loadData: function() {
     // Ensures data this text is in cache, rerenders after data load if needed
@@ -3106,14 +3105,13 @@ var ReaderTextTableOfContents = React.createClass({
     if (!details) {
       Sefaria.indexDetails(this.props.title, () => this.forceUpdate() );
     }
+    var ref  = this.getDataRef();
     if (this.isBookToc()) {
-      var ref  = this.getDataRef();
-      var versions = Sefaria.versions(ref)
+      var versions = Sefaria.versions(ref);
       if (!versions) {
         Sefaria.versions(ref, () => this.forceUpdate() );        
       } 
     } else if (this.isTextToc()) {
-      var ref  = this.getDataRef();
       var data = this.getData();
       if (!data) {
         Sefaria.text(
@@ -6321,23 +6319,25 @@ var TextSegment = React.createClass({
     onSegmentClick:  React.PropTypes.func,
     onFootnoteClick: React.PropTypes.func,
     version:         React.PropTypes.string,
-    versionLanguage: React.PropTypes.string,
+    versionLanguage: React.PropTypes.string
   },
   getInitialState: function() {
     return {
-      enBeingEdited: false,
-      heBeingEdited: false
+      beingEdited: {en: false, he: false}
     };
   },
   handleClick: function(event) {
-    if ($(event.target).hasClass("refLink")) {
+    var $target = $(event.target);
+    if (($target.is("span") && $target.length && $target[0].isContentEditable) || ($target.parents("span").length && $target.parents("span")[0].isContentEditable)) {
+      event.stopPropagation();
+    } else if ($target.hasClass("refLink")) {
       //Click of citation
       event.preventDefault();//add prevent default
-      var ref = Sefaria.humanRef($(event.target).attr("data-ref"));
+      var ref = Sefaria.humanRef($target.attr("data-ref"));
       this.props.onCitationClick(ref, this.props.sref);
       event.stopPropagation();
       Sefaria.site.track.event("Reader", "Citation Link Click", ref);
-    } else if ($(event.target).is("sup") || $(event.target).parents("sup").size()) {
+    } else if ($target.is("sup") || $target.parents("sup").size()) {
       this.props.onFootnoteClick(event);
       event.stopPropagation();
     } else if (this.props.onSegmentClick) {
@@ -6345,18 +6345,56 @@ var TextSegment = React.createClass({
       Sefaria.site.track.event("Reader", "Text Segment Click", this.props.sref);
     }
   },
-  makeEnEditable: function(event) {event.stopPropagation(); this.setState({enBeingEdited: true})},
-  makeHeEditable: function(event) {event.stopPropagation(); this.setState({heBeingEdited: true})},
-  saveEn: function(event) {event.stopPropagation(); console.log("Saving English")},
-  saveHe: function(event) {event.stopPropagation(); console.log("Saving Hebrew")},
+  getData: function() {
+    // Gets data about this text from cache, which may be null.
+    return Sefaria.text(this.props.sref, {version: this.props.version, language: this.props.versionLanguage});
+  },
+  getCurrentVersion: function(lang) {
+    var d = this.getData();
+    if (!d) { return null; }
+
+    return {
+      versionTitle:        lang == "he" ? d.heVersionTitle : d.versionTitle,
+      versionSource:       lang == "he" ? d.heVersionSource : d.versionSource,
+      versionStatus:       lang == "he" ? d.heVersionStatus : d.versionStatus
+    };
+  },
+  makeEditable: function(lang, event) {
+    event.stopPropagation();
+    this._setBeingEditedState(lang, true);
+  },
+  _setBeingEditedState(lang, state) {
+    var newobj = {};
+    newobj[lang] = state;
+    Object.assign(this.state.beingEdited, newobj);
+    this.setState({beingEdited: this.state.beingEdited});
+  },
+  save: function(lang, event) {
+    event.stopPropagation();
+    var v = this.getCurrentVersion(lang);
+    if (!v) {
+      console.log("Failed to get current version.");
+      return;
+    }
+    var text = $(event.target).prev("span").html().trim();
+    console.log(`Saving ${this.props.sref}/${v["versionTitle"]}/${lang}/${v["versionSource"]}`);
+    Sefaria.postSegment(this.props.sref, v["versionTitle"], lang, v["versionSource"], text,
+        function(e) {
+            console.log("Saved.");
+            this._setBeingEditedState(lang, false);
+        }.bind(this),
+        function(e) {
+            console.log("Failed to save.");
+        });
+  },
   render: function() {
     var linkCountElement;
-    var editButtonEn = <i className="fa fa-pencil-square-o en" aria-hidden="true" onClick={this.makeEnEditable}/>;
-    var editButtonHe = <i className="fa fa-pencil-square-o he" aria-hidden="true" onClick={this.makeHeEditable}/>;
-    var saveButtonEn = <i className="fa fa-floppy-o en" aria-hidden="true" onClick={this.saveEn}/>;
-    var saveButtonHe = <i className="fa fa-floppy-o he" aria-hidden="true" onClick={this.saveHe}/>;
-    var enButton = (!Sefaria.is_moderator)?"":(this.state.enBeingEdited)?saveButtonEn:editButtonEn;
-    var heButton = (!Sefaria.is_moderator)?"":(this.state.heBeingEdited)?saveButtonHe:editButtonHe;
+    var editButtonEn = <i className="fa fa-pencil-square-o en" aria-hidden="true" onClick={this.makeEditable.bind(this, "en")}/>;
+    var editButtonHe = <i className="fa fa-pencil-square-o he" aria-hidden="true" onClick={this.makeEditable.bind(this, "he")}/>;
+    var saveButtonEn = <i className="fa fa-floppy-o en" aria-hidden="true" onClick={this.save.bind(this, "en")}/>;
+    var saveButtonHe = <i className="fa fa-floppy-o he" aria-hidden="true" onClick={this.save.bind(this, "he")}/>;
+    var enButton = (!Sefaria.is_moderator)?"":(this.state.beingEdited.en)?saveButtonEn:editButtonEn;
+    var heButton = (!Sefaria.is_moderator)?"":(this.state.beingEdited.he)?saveButtonHe:editButtonHe;
 
     if (this.props.showLinkCount) {
       var linkCount = Sefaria.linkCount(this.props.sref, this.props.filter);
@@ -6387,8 +6425,8 @@ var TextSegment = React.createClass({
       <span className={classes} onClick={this.handleClick} data-ref={this.props.sref}>
         {segmentNumber}
         {linkCountElement}
-        <span className="he" contenteditable={this.state.heBeingEdited?"true":"false"} dangerouslySetInnerHTML={ {__html: he + " "} }></span>{heButton}
-        <span className="en" contenteditable={this.state.enBeingEdited?"true":"false"} dangerouslySetInnerHTML={ {__html: en + " "} }></span>{enButton}
+        <span className="he" contentEditable={this.state.beingEdited.he} dangerouslySetInnerHTML={ {__html: he + " "} }></span>{heButton}
+        <span className="en" contentEditable={this.state.beingEdited.en} dangerouslySetInnerHTML={ {__html: en + " "} }></span>{enButton}
         <div className="clearFix"></div>
       </span>
     );

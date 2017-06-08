@@ -456,15 +456,16 @@ Sefaria = extend(Sefaria, {
     if (!versionTitle || !language) { return; }
     this.lookupRef(ref, function(data) {
         if (!data.is_segment) { return; }
-        $.ajax({
-          dataType: "json",
-          url: "/api/texts/" + data.ref,
-          data: {
+        var d = {json: JSON.stringify({
             versionTitle: versionTitle,
             language: language,
             versionSource: versionSource,
             text: text
-          },
+          })};
+        $.ajax({
+          dataType: "json",
+          url: "/api/texts/" + data.url,
+          data: d,
           type: "POST",
           success: success,
           error: error
