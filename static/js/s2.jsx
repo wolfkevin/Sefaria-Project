@@ -6242,6 +6242,8 @@ var TextRange = React.createClass({
             onSegmentClick={this.props.onSegmentClick}
             onCitationClick={this.props.onCitationClick}
             onFootnoteClick={this.onFootnoteClick}
+            version={this.props.version}
+            versionLanguage={this.props.versionLanguage}
             key={i + segment.ref} />
       );
     }.bind(this));
@@ -6317,7 +6319,15 @@ var TextSegment = React.createClass({
     filter:          React.PropTypes.array,
     onCitationClick: React.PropTypes.func,
     onSegmentClick:  React.PropTypes.func,
-    onFootnoteClick: React.PropTypes.func
+    onFootnoteClick: React.PropTypes.func,
+    version:         React.PropTypes.string,
+    versionLanguage: React.PropTypes.string,
+  },
+  getInitialState: function() {
+    return {
+      enBeingEdited: false,
+      heBeingEdited: false
+    };
   },
   handleClick: function(event) {
     if ($(event.target).hasClass("refLink")) {
@@ -6335,8 +6345,19 @@ var TextSegment = React.createClass({
       Sefaria.site.track.event("Reader", "Text Segment Click", this.props.sref);
     }
   },
+  makeEnEditable: function(event) {event.stopPropagation(); this.setState({enBeingEdited: true})},
+  makeHeEditable: function(event) {event.stopPropagation(); this.setState({heBeingEdited: true})},
+  saveEn: function(event) {event.stopPropagation(); console.log("Saving English")},
+  saveHe: function(event) {event.stopPropagation(); console.log("Saving Hebrew")},
   render: function() {
     var linkCountElement;
+    var editButtonEn = <i className="fa fa-pencil-square-o en" aria-hidden="true" onClick={this.makeEnEditable}/>;
+    var editButtonHe = <i className="fa fa-pencil-square-o he" aria-hidden="true" onClick={this.makeHeEditable}/>;
+    var saveButtonEn = <i className="fa fa-floppy-o en" aria-hidden="true" onClick={this.saveEn}/>;
+    var saveButtonHe = <i className="fa fa-floppy-o he" aria-hidden="true" onClick={this.saveHe}/>;
+    var enButton = (!Sefaria.is_moderator)?"":(this.state.enBeingEdited)?saveButtonEn:editButtonEn;
+    var heButton = (!Sefaria.is_moderator)?"":(this.state.heBeingEdited)?saveButtonHe:editButtonHe;
+
     if (this.props.showLinkCount) {
       var linkCount = Sefaria.linkCount(this.props.sref, this.props.filter);
       var minOpacity = 20, maxOpacity = 70;
@@ -6366,8 +6387,8 @@ var TextSegment = React.createClass({
       <span className={classes} onClick={this.handleClick} data-ref={this.props.sref}>
         {segmentNumber}
         {linkCountElement}
-        <span className="he" dangerouslySetInnerHTML={ {__html: he + " "} }></span>
-        <span className="en" dangerouslySetInnerHTML={ {__html: en + " "} }></span>
+        <span className="he" contenteditable={this.state.heBeingEdited?"true":"false"} dangerouslySetInnerHTML={ {__html: he + " "} }></span>{heButton}
+        <span className="en" contenteditable={this.state.enBeingEdited?"true":"false"} dangerouslySetInnerHTML={ {__html: en + " "} }></span>{enButton}
         <div className="clearFix"></div>
       </span>
     );

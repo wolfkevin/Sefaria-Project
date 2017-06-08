@@ -475,6 +475,9 @@ input.noselect {
 .int-he .int-he {
   font-size: inherit;
 }
+.readerPanel .fa.he {
+    font: normal normal normal 14px/1 FontAwesome;
+}
 .readerPanel .he {
   font-family: "Taamey Frank", "Times New Roman", serif;
   direction: rtl;
@@ -2133,6 +2136,10 @@ a.readerNavCategory {
 .bilingual .segment > .he,
 .bilingual .segment > .en { 
   display: block;
+}
+.bilingual .segment > .fa.he,
+.bilingual .segment > .fa.en {
+  display: inline-block;
 }
 .bilingual .segment > .en { 
   text-align: left;
