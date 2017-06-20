@@ -12,7 +12,6 @@
 .interface-hebrew .static.biReady{
   direction:rtl;
 }
-
 .static {
   color: #333333;
   font-size: 15px;
@@ -1877,17 +1876,6 @@ body.interface-hebrew #visualGardenPage .filter-title .reset {
 #visualGardenPage #map-chart .selected path {
   stroke-width: 1;
   stroke: white;
-}
-
-#visualGardenPage .sourceSheetPanelBox {
-    position: fixed;
-    display: block;
-    left: 40%;
-    top: 90px;
-    width: 330px;
-    padding: 20px;
-    background: white;
-    border: #ccc 2px solid;
 }
 #visualGardenPage .sourceSheetPanelBox .contentInner {
   margin: 0 auto;

@@ -29,6 +29,7 @@ urlpatterns = patterns('reader.views',
     (r'^api/links/bare/(?P<book>.+)/(?P<cat>.+)$', 'bare_link_api'),
     (r'^api/links/(?P<link_id_or_ref>.*)$', 'links_api'),
     (r'^api/link-summary/(?P<ref>.+)$', 'link_summary_api'),
+    (r'^api/notes/all$', 'all_notes_api'),
     (r'^api/notes/(?P<note_id_or_ref>.*)$', 'notes_api'),
     (r'^api/related/(?P<tref>.*)$', 'related_api'),
     (r'^api/counts/links/(?P<cat1>.+)/(?P<cat2>.+)$', 'link_count_api'),
@@ -251,6 +252,7 @@ static_pages = [
     "privacy-policy",
     "coming-soon",
     "shraga-silverstein",
+    "adin-even-israel-steinsaltz",
     "william-davidson-talmud",
     "linker",
     "ios",
@@ -267,6 +269,7 @@ static_pages = [
     "random-walk-through-torah",
     "educators",
     "the-sefaria-story",
+
 ]
 
 # Static and Semi Static Content
@@ -289,6 +292,7 @@ urlpatterns += patterns('reader.views',
     (r'^s2/?$', 'switch_to_s2'),
     (r'^account/?$', 's2_account'),
     (r'^notifications/?$', 's2_notifications'),
+    (r'^my/notes/?$', 's2_my_notes'),
     (r'^updates/?$', 's2_updates'),
     (r'^modtools/?$', 's2_modtools'),
     (r'^person/(?P<name>.+)$', 'person_page'),

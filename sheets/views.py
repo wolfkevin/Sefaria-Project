@@ -890,7 +890,11 @@ def add_source_to_sheet_api(request, sheet_id):
 			source.pop("versionLanguage", None)
 			source["text"] = text
 
-	return jsonResponse(add_source_to_sheet(int(sheet_id), source))
+
+	note = request.POST.get("note", None) 
+	response = add_source_to_sheet(int(sheet_id), source, note=note)
+
+	return jsonResponse(response)
 
 
 def copy_source_to_sheet_api(request, sheet_id):
@@ -1007,7 +1011,7 @@ def trending_tags_api(request):
 	"""
 	API to retrieve the list of peopke who like sheet_id.
 	"""
-	response = recent_public_tags(days=14)
+	response = recent_public_tags(days=14, ntags=18)
 	response = jsonResponse(response, callback=request.GET.get("callback", None))
 	response["Cache-Control"] = "max-age=3600"
 	return response
