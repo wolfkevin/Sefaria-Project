@@ -2689,7 +2689,7 @@ var ReaderDisplayOptionsMenu = React.createClass({
     if (this.props.menuOpen === "search") {
       return React.createElement(
         'div',
-        { className: 'readerOptionsPanel', role: 'dialog', tabindex: '0' },
+        { className: 'readerOptionsPanel', role: 'dialog', tabIndex: '0' },
         React.createElement(
           'div',
           { className: 'readerOptionsPanelInner' },
@@ -2701,7 +2701,7 @@ var ReaderDisplayOptionsMenu = React.createClass({
     } else if (this.props.menuOpen) {
       return React.createElement(
         'div',
-        { className: 'readerOptionsPanel', role: 'dialog', tabindex: '0' },
+        { className: 'readerOptionsPanel', role: 'dialog', tabIndex: '0' },
         React.createElement(
           'div',
           { className: 'readerOptionsPanelInner' },
@@ -2711,7 +2711,7 @@ var ReaderDisplayOptionsMenu = React.createClass({
     } else {
       return React.createElement(
         'div',
-        { className: 'readerOptionsPanel', role: 'dialog', tabindex: '0' },
+        { className: 'readerOptionsPanel', role: 'dialog', tabIndex: '0' },
         React.createElement(
           'div',
           { className: 'readerOptionsPanelInner' },
@@ -3075,14 +3075,7 @@ var ReaderNavigationMenu = React.createClass({
       var nRecent = this.width < 500 ? 4 : 6;
       var recentlyViewed = Sefaria.recentlyViewed;
       var hasMore = recentlyViewed.length > nRecent;
-      recentlyViewed = recentlyViewed.filter(function (item) {
-        // after a text has been deleted a recent ref may be invalid,
-        // but don't try to check when booksDict is not available during server side render
-        if (Object.keys(Sefaria.booksDict).length === 0) {
-          return true;
-        }
-        return Sefaria.isRef(item.ref);
-      }).map(function (item) {
+      recentlyViewed = recentlyViewed.slice(0, hasMore ? nRecent - 1 : nRecent).map(function (item) {
         return React.createElement(TextBlockLink, {
           sref: item.ref,
           heRef: item.heRef,
@@ -3091,7 +3084,7 @@ var ReaderNavigationMenu = React.createClass({
           versionLanguage: item.versionLanguage,
           showSections: true,
           recentItem: true });
-      }).slice(0, hasMore ? nRecent - 1 : nRecent);
+      });
       if (hasMore) {
         recentlyViewed.push(React.createElement(
           'a',
@@ -3945,7 +3938,12 @@ var ReaderTextTableOfContents = React.createClass({
           React.createElement(
             'option',
             { key: 'txt', value: 'txt' },
-            'Text'
+            'Text (with tags)'
+          ),
+          React.createElement(
+            'option',
+            { key: 'plain.txt', value: 'plain.txt' },
+            'Text (without tags)'
           ),
           React.createElement(
             'option',
@@ -12145,14 +12143,7 @@ var RecentPanel = React.createClass({
   render: function render() {
     var width = typeof window !== "undefined" ? $(window).width() : 1000;
 
-    var recentItems = Sefaria.recentlyViewed.filter(function (item) {
-      // after a text has been deleted a recent ref may be invalid,
-      // but don't try to check when booksDict is not available during server side render
-      if (Object.keys(Sefaria.booksDict).length === 0) {
-        return true;
-      }
-      return Sefaria.isRef(item.ref);
-    }).map(function (item) {
+    var recentItems = Sefaria.recentlyViewed.map(function (item) {
       return React.createElement(TextBlockLink, {
         sref: item.ref,
         heRef: item.heRef,
@@ -12781,7 +12772,12 @@ var ModeratorToolsPanel = React.createClass({
         React.createElement(
           'option',
           { key: 'txt', value: 'txt' },
-          'Text'
+          'Text (with tags)'
+        ),
+        React.createElement(
+          'option',
+          { key: 'plain.txt', value: 'plain.txt' },
+          'Text (without tags)'
         ),
         React.createElement(
           'option',
