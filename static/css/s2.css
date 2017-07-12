@@ -9,7 +9,7 @@ body {
   /* font-family: "proxima-nova", "Helvetica Neue", Helvetica, sans-serif; */
 }
 body .he {
-  /* font-family: "Heebo", sans-serif; */
+  /* font-family: "Open Sans Hebrew", sans-serif; */
 }
 *::selection {
   background-color: #D2DCFF;
@@ -29,7 +29,7 @@ body.dark {
 .sans .he, 
 #s2 .sans .he,
 .sans .int-he {
-  font-family: "Heebo", sans-serif;
+  font-family: "Open Sans Hebrew", sans-serif;
 }
 #s2 {
   position: fixed;
@@ -229,7 +229,7 @@ input.noselect {
   font-family: "proxima-nova", "Helvetica Neue", Helvetica, sans-serif;
 }
 .header .login .he {
-  font-family: "Heebo", sans-serif;
+  font-family: "Open Sans Hebrew", sans-serif;
 }
 .header .testWarning {
   display: inline-block;
@@ -551,7 +551,7 @@ input.noselect {
 }
 .interface-hebrew .systemPanel .content .int-he {
   display: inline;
-  font-family: "Heebo", sans-serif;
+  font-family: "Open Sans Hebrew", sans-serif;
 }
 .loadingMessage {
   font-size: 14px;
@@ -804,7 +804,7 @@ h1 .languageToggle .he {
   font-family: "proxima-nova", "Helvetica Neue", "Helvetica", sans-serif;
 }
 .readerPanel h2 .he, .readerPanel h3 .he {
-  font-family: "Heebo", sans-serif;
+  font-family: "Open Sans Hebrew", sans-serif;
 }
 .readerNavSection h2 {
   font-size: 13px;
@@ -923,7 +923,7 @@ a.readerNavCategory {
   font-family: "proxima-nova", "Helvetica Neue", "Helvetica", sans-serif;
 }
 .readerNavMenu .resourcesLink .he {
-  font-family: "Heebo", sans-serif;
+  font-family: "Open Sans Hebrew", sans-serif;
 }
 .readerNavMenu .resourcesLink .fa {
   margin: 0 6px;
@@ -952,7 +952,7 @@ a.readerNavCategory {
   font-family: "proxima-nova", "Helvetica Neue", "Helvetica", sans-serif;
 }
 .readerNavMenu .siteLinks .siteLink .he {
-  font-family: "Heebo", sans-serif;
+  font-family: "Open Sans Hebrew", sans-serif;
 }
 .readerNavMenu .siteLink .fa {
   margin: 0 4px;
@@ -1044,7 +1044,7 @@ a.readerNavCategory {
   font-family: "proxima-nova", "Helvetica Neue", "Helvetica", sans-serif;
 }
 .readerTextTableOfContents .readerTextToc .he {
-  font-family: "Heebo", sans-serif;
+  font-family: "Open Sans Hebrew", sans-serif;
 }
 .readerTextTableOfContents .categoryAttribution {
   color: #666;
@@ -1079,7 +1079,7 @@ a.readerNavCategory {
   letter-spacing: 1px;
 }
 .readerTextTableOfContents .currentSection .he {
-  font-family: "Heebo", sans-serif;
+  font-family: "Open Sans Hebrew", sans-serif;
 }
 .readerTextTableOfContents .tocDetails {
   margin-top: 30px;
@@ -1233,7 +1233,7 @@ a.readerNavCategory {
   font-family: "proxima-nova", "Helvetica Neue", "Helvetica", sans-serif;
 }
 .readerTextTableOfContents .content .sectionLink  .he {
-  font-family: "Heebo", sans-serif;
+  font-family: "Open Sans Hebrew", sans-serif;
 }
 .interface-hebrew .readerTextTableOfContents .content .structToggles{
   direction: rtl;
@@ -1257,7 +1257,7 @@ a.readerNavCategory {
   font-family: "proxima-nova", "Helvetica Neue", "Helvetica", sans-serif;
 }
 .readerTextTableOfContents .content .structToggles .he {
-  font-family: "Heebo", sans-serif;
+  font-family: "Open Sans Hebrew", sans-serif;
 }
 .readerTextTableOfContents .structToggles .altStructToggleBox {
   display: table-cell;
@@ -1319,7 +1319,7 @@ a.readerNavCategory {
   cursor: pointer;
 }
 .readerTextTableOfContents .content .schema-node-title .he {
-  font-family: "Heebo", sans-serif;
+  font-family: "Open Sans Hebrew", sans-serif;
 }
 .readerTextTableOfContents .content .schema-node-toc {
   display: block;
@@ -1478,7 +1478,7 @@ a.readerNavCategory {
 }
 .modTools .versionDownloadButton .he,
 .readerTextTableOfContents .content .versionDownloadButton .he {
-    font-family: "Heebo", sans-serif;
+    font-family: "Open Sans Hebrew", sans-serif;
     direction: rtl;
     text-align: right;
 }
@@ -1535,7 +1535,7 @@ a.readerNavCategory {
 
 .searchContent .type-button .he,
 .readerSheetsNav .type-button .he {
-  font-family: "Heebo", sans-serif;
+  font-family: "Open Sans Hebrew", sans-serif;
 }
 
 .searchContent .type-button.active,
@@ -1571,7 +1571,7 @@ a.readerNavCategory {
   font-family: "proxima-nova", "Helvetica Neue", "Helvetica", sans-serif;
 }
 .searchContent .searchFilterToggle .he {
-  font-family: "Heebo", sans-serif;
+  font-family: "Open Sans Hebrew", sans-serif;
 }
 .searchContent .searchFilterToggle img {
   opacity: 0.43;
@@ -1617,7 +1617,7 @@ a.readerNavCategory {
   background-color: #e0e0e0;
 }
 .interface-hebrew .searchContent .searchFilterBoxes li {
-  font-family: "Heebo", sans-serif;
+  font-family: "Open Sans Hebrew", sans-serif;
   padding: 10px 15px 10px 0;
 }
 .searchContent .searchFilterBoxes li input[type="checkbox"] {
@@ -1699,7 +1699,7 @@ a.readerNavCategory {
   cursor: pointer;
 }
 .interface-hebrew .searchContent .searchSortBox tr {
-  font-family: "Heebo", sans-serif;
+  font-family: "Open Sans Hebrew", sans-serif;
 }
 .searchContent .searchSortBox tr:hover {
   background-color: #e0e0e0;
@@ -2528,7 +2528,7 @@ a.readerNavCategory {
   font-family: "proxima-nova", "Helvetica Neue", "Helvetica", arial, sans-serif;
 }
 .textRange .actionLinks .he {
-  font-family: "Heebo", sans-serif;
+  font-family: "Open Sans Hebrew", sans-serif;
 }
 /* Footnotes */
 .segment sup {
@@ -2538,7 +2538,7 @@ a.readerNavCategory {
 }
 .segment sup.itag {
   text-decoration: none;
-  font-family: "Heebo", "sans-serif";
+  font-family: "Open Sans Hebrew", "sans-serif";
   font-size: 0.6em;
   line-height: 1;
   color: #4871bf;
@@ -3260,7 +3260,7 @@ a.readerNavCategory {
   font-family: "proxima-nova", "Helvetica Neue", "Helvetica", sans-serif;
 }
 .systemPanel.readerNavMenu h1 .he {
-  font-family: "Heebo", sans-serif;
+  font-family: "Open Sans Hebrew", sans-serif;
 }
 .systemPanel.readerNavMenu h1 .button {
   position: absolute;
@@ -3879,7 +3879,7 @@ h2.splitHeader .he {
   direction: ltr;
 }
 .int-he{
-  font-family: "Heebo", sans-serif;
+  font-family: "Open Sans Hebrew", sans-serif;
 }
 .int-en{
   font-family: "proxima-nova", "Helvetica Neue", "Helvetica", sans-serif;
@@ -3932,7 +3932,7 @@ body #keyboardInputMaster tbody tr td table{
 body #keyboardInputMaster tbody tr td table tbody tr td{
     border: 0.5px solid #eee;
     background: white;
-    font-family: "Heebo","proxima-nova", sans-serif;
+    font-family: "Open Sans Hebrew","proxima-nova", sans-serif;
     min-width: 15px;
     vertical-align: middle;
     padding: 2px 8px;
@@ -3953,7 +3953,7 @@ body #keyboardInputMaster tbody tr td table tbody tr td.pressed{
   font-family: "proxima-nova", "Helvetica Neue", "Helvetica", sans-serif;
 }
 #editGroupPage .int-he {
-  font-family: "Heebo", sans-serif;
+  font-family: "Open Sans Hebrew", sans-serif;
 }
 #editGroupPage .field {
   box-sizing: border-box;
