@@ -61,9 +61,9 @@ class TextRange extends Component {
     }
   }
   handleKeyPress(event) {
-     if (event.charCode == 13) {
-       this.handleClick(event);
-     }
+    if (event.charCode == 13) {
+      this.handleClick(event);
+    }
   }
   getText() {
     var settings = {
@@ -235,6 +235,7 @@ class TextRange extends Component {
                         this.props.basetext && segment.highlight;                   // otherwise highlight if this a basetext and the ref is specific
       return (
         <TextSegment
+            panelPosition={this.props.panelPosition}
             sref={segment.ref}
             en={segment.en}
             he={segment.he}
