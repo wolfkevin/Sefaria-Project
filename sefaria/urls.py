@@ -132,7 +132,7 @@ urlpatterns += patterns('sheets.views',
     (r'^sheets/tags/?$', 'sheets_tags_list'),
     (r'^sheets/tags/(?P<tag>.+)$', 'sheets_tag'),
     (r'^sheets/private/tags/(?P<tag>.+)$', 'private_sheets_tag'),
-    (r'^sheets/(?P<type>(public|private|allz))/?$', 'sheets_list'),
+    (r'^sheets/(?P<type>(public|private))/?$', 'sheets_list'),
     (r'^sheets/(?P<sheet_id>\d+)$', 'view_sheet'),
     (r'^sheets/visual/(?P<sheet_id>\d+)$', 'view_visual_sheet'),
 
@@ -236,6 +236,11 @@ urlpatterns += patterns('',
     url(r'^password/reset/confirm/(?P<uidb36>[0-9A-Za-z]+)-(?P<token>.+)/$', 'django.contrib.auth.views.password_reset_confirm', name='password_reset_confirm'),
     url(r'^password/reset/complete/$', 'django.contrib.auth.views.password_reset_complete', name='password_reset_complete'),
     url(r'^password/reset/done/$', 'django.contrib.auth.views.password_reset_done', name='password_reset_done'),
+)
+
+# Compare Page
+urlpatterns += patterns('sefaria.views',
+    url(r'^compare/(?P<ref1>[^/]+)/(?P<ref2>[^/]+)/(?P<lang>en|he)/?(?P<v1>[^/]+)?/?(?P<v2>[^/]+)?$', 'compare')
 )
 
 static_pages = [

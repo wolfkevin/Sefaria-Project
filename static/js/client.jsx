@@ -1,18 +1,25 @@
-var $            = require('jquery'),
-    React        = require('react'),
-    ReactDOM     = require('react-dom'),
-    DjangoCSRF   = require('./django-csrf'),
-    SefariaReact = require('./s2');
+const $            = require('./sefaria/sefariaJquery'),
+      React        = require('react'),
+      ReactDOM     = require('react-dom'),
+      DjangoCSRF   = require('./lib/django-csrf'),
+      SefariaReact = require('./ReaderApp');
+
+
 
 
 $(function() {
   var container = document.getElementById('s2');
   var component;
+  DjangoCSRF.init();
   if (DJANGO_VARS.inReaderApp) {
-    DjangoCSRF.init();
-    SefariaReact.unpackDataFromProps(DJANGO_VARS.propsJSON);
+    Sefaria.unpackDataFromProps(DJANGO_VARS.propsJSON);
     component = React.createElement(SefariaReact.ReaderApp, DJANGO_VARS.propsJSON);
     ReactDOM.render(component, container);
+  } else if (DJANGO_VARS.containerId && DJANGO_VARS.reactComponentName) {
+    container = document.getElementById(DJANGO_VARS.containerId);
+    component = React.createElement(SefariaReact[DJANGO_VARS.reactComponentName], DJANGO_VARS.propsJSON);
+    ReactDOM.render(component, container);
+    ReactDOM.render(React.createElement(SefariaReact.Footer), document.getElementById('footer'));
   } else {
     var settings = {
       language: DJANGO_VARS.contentLang,

@@ -9,7 +9,7 @@ var http           = require('http'),
     settings       = require('./local_settings.json'),
     React          = require('react'),
     ReactDOMServer = require('react-dom/server'),
-    SefariaReact   = require('../static/js/s2.jsx'),
+    SefariaReact   = require('../static/js/ReaderApp.jsx'),
     ReaderApp      = React.createFactory(SefariaReact.ReaderApp);
 
 var server = express();
@@ -21,7 +21,7 @@ var log = settings.DEBUG ? console.log : function() {};
 
 var renderReaderApp = function(props, data, timer) {
   // Returns HTML of ReaderApp component given `props` and `data`
-  data.path           = props.path;
+  data.initialPath    = props.initialPath;
   data.loggedIn       = props.loggedIn;
   data._uid           = props._uid;
   data.recentlyViewed = props.recentlyViewed;
@@ -55,7 +55,6 @@ server.post('/ReaderApp/:cachekey', function(req, res) {
     if (!error && response.statusCode == 200) {
       log("Time to get data.js: %dms", timer.elapsed());
       (0, eval)(body); // to understand why this is necessary, see: https://stackoverflow.com/questions/19357978/indirect-eval-call-in-strict-mode
-      console.log("DJANGO DATA VARS", typeof DJANGO_DATA_VARS === "undefined");
       log("Time to eval data.js: %dms", timer.elapsed());
       var html = renderReaderApp(props, DJANGO_DATA_VARS, timer);
       res.end(html);
