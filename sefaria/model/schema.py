@@ -595,7 +595,7 @@ class TitledTreeNode(TreeNode, AbstractTitledOrTermedObject):
     A tree node that has a collection of titles - as contained in a TitleGroup instance.
     In this class, node titles, terms, 'default', and combined titles are handled.
     """
-    after_title_delimiter_re = ur"[,.: \r\n]+"  # should be an arg?  \r\n are for html matches
+    after_title_delimiter_re = ur"[,.: \r\nsto]+"  # should be an arg?  \r\n are for html matches
     title_separators = [u", "]
 
     def __init__(self, serial=None, **kwargs):
@@ -1397,19 +1397,20 @@ class VirtualNode(TitledTreeNode):
         return self.entry_class(self, title, tref)
 
 
-
 class DictionaryEntryNode(TitledTreeNode):
     is_virtual = True
 
     def __init__(self, parent, title=None, tref=None, word=None):
         """
-        Can be instanciated with title+tref or word
+        A schema node created on the fly, in memory, to correspond to a dictionary entry
+        Can be instantiated with title+tref or word
         :param parent:
         :param title:
         :param tref:
         :param word:
         """
         if title and tref:
+            self.title = title
             reg = regex.compile(regex.escape(title) + self.after_title_delimiter_re  + "(\S[^.]*)(?:\.)?(\d+)?")
             match = reg.match(tref)
             self.word = match.group(1) or ""
@@ -1434,6 +1435,8 @@ class DictionaryEntryNode(TitledTreeNode):
         self.sectionNames = ["Line"]    # Hacky hack
         self.depth = 1
         self.addressTypes = ["Integer"]
+        self._addressTypes = [AddressInteger(0)]
+
         if self.word:
             # The hardcoded "Jastrow Dictionary" below needs to be passed in.  Likely define that on schema and derivce class from it
 
@@ -1442,9 +1445,14 @@ class DictionaryEntryNode(TitledTreeNode):
         else:
             self.word = "Not Found"
 
-    def get_sections(self):
-        return []
-    
+    def get_sections(self, tref):
+        reg = regex.compile(regex.escape(self.title) + self.after_title_delimiter_re + "(\S[^.]*)(?:\.)?(\d+)?")
+        s = reg.match(tref).group(2)
+        return [int(s)] if s else []
+
+    def address_class(self, depth):
+        return self._addressTypes[depth]
+
     def get_text(self):
         if not self.has_word_match:
             return [u"No Entry for {}".format(self.word)]
@@ -1485,8 +1493,12 @@ class DictionaryEntryNode(TitledTreeNode):
         }
         return text.Ref(_obj=d)
 
-class DictionaryNode(VirtualNode):
 
+class DictionaryNode(VirtualNode):
+    """
+    A schema node corresponding to the entirety of a dictionary.
+    The parent of DictionaryEntryNode objects, which represent individual entries
+    """
     entry_class = DictionaryEntryNode
 
     def __init__(self, serial=None, **kwargs):
@@ -1498,7 +1510,7 @@ class DictionaryNode(VirtualNode):
         """
         super(DictionaryNode, self).__init__(serial, **kwargs)
         try:
-            from lexicon import JastrowDictionaryEntry  # todo: get the right import scope here
+            from lexicon import JastrowDictionaryEntry, KleinDictionaryEntry  # todo: get the right import scope here
             self.dictionaryClass = locals()[self.dictionaryClassName]
         except KeyError:
             raise IndexSchemaError("No matching class for {} in DictionaryNode".format(self.dictionaryClassName))

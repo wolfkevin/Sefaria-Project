@@ -1757,7 +1757,7 @@ class TextFamily(object):
                 #only wrap links if we know there ARE links- get the version, since that's the only reliable way to get it's ObjectId
                 #then count how many links came from that version. If any- do the wrapping.
                 from . import LinkSet
-                if c.version_ids() and LinkSet({"generated_by":"add_links_from_text", "source_text_oid": {"$in": c.version_ids()}}).count() > 0:
+                if c.version_ids() and LinkSet({"generated_by": "add_links_from_text", "source_text_oid": {"$in": c.version_ids()}}).count() > 0:
                     setattr(self, self.text_attr_map[language], c.ja().modify_by_function(lambda s: library.get_wrapped_refs_string(s, lang=language, citing_only=True)))
                 else:
                     setattr(self, self.text_attr_map[language], c.text)
@@ -2175,7 +2175,6 @@ class Ref(object):
                 return
 
         # At this point, `title` is something like "Exodus" or "Rashi on Exodus" or "Pesach Haggadah, Magid, Four Sons"
-        # JJ title = "Jastrow"
         if title:
             assert isinstance(self.index_node, TitledTreeNode)
             self.index = self.index_node.index
@@ -2224,7 +2223,7 @@ class Ref(object):
         except AttributeError:
             if self.index_node.is_virtual:
                 self.index_node = self.index_node.create_dynamic_node(title, base)
-                self.sections = self.index_node.get_sections()
+                self.sections = self.index_node.get_sections(base)
                 self.toSections = self.sections[:]
                 return
 
