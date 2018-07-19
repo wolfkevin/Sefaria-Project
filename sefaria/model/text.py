@@ -867,7 +867,7 @@ class AbstractTextRecord(object):
     """
     text_attr = "chapter"
     ALLOWED_TAGS    = ("i", "b", "br", "u", "strong", "em", "big", "small", "img", "sup", "span")
-    ALLOWED_ATTRS   = {'span':['class'], 'i': ['data-commentator', 'data-order', 'class', 'data-label'], 'img': lambda name, value: name == 'src' and value.startswith("data:image/")}
+    ALLOWED_ATTRS   = {'span':['class', 'dir'], 'i': ['data-commentator', 'data-order', 'class', 'data-label'], 'img': lambda name, value: name == 'src' and value.startswith("data:image/")}
 
     def word_count(self):
         """ Returns the number of words in this text """
@@ -1180,11 +1180,11 @@ def merge_texts(text, sources):
         text = text[0]
     return [text, text_sources]
 
+
 class TextFamilyDelegator(type):
     """
     Metaclass to delegate virtual text records
     """
-
 
     def __call__(cls, *args, **kwargs):
         if len(args) >= 1:
@@ -1613,17 +1613,21 @@ class VirtualTextChunk(AbstractTextRecord):
         self._oref = oref
         self.text = oref.index_node.get_text()   # <- This is where the magic happens
         self._ref_depth = len(self._oref.sections)
-        self._saveable = False  # Can this TextChunk be saved?
+        self._saveable = False
 
         self.lang = lang
         self.is_merged = False
         self.sources = []
+        self._version = Version().load({
+            "title": oref.index_node.parent.lexicon.index_title,
+            "versionTitle": oref.index_node.parent.lexicon.version_title
+        })    # Currently vtitle is thrown out.  There's only one version of each lexicon.
 
     def version(self):
-        return ""
+        return self._version
 
     def version_ids(self):
-        return ["virtualid"]
+        return [self._version._id]
 
 
 # This was built as a bridge between the object model and existing front end code, so has some hallmarks of that legacy.
@@ -1754,11 +1758,13 @@ class TextFamily(object):
             else:
                 c = TextChunk(oref, language)
             self._chunks[language] = c
-            if wrapLinks:
+            if wrapLinks and c.version_ids():
                 #only wrap links if we know there ARE links- get the version, since that's the only reliable way to get it's ObjectId
                 #then count how many links came from that version. If any- do the wrapping.
                 from . import LinkSet
-                if c.version_ids() and LinkSet({"generated_by": "add_links_from_text", "source_text_oid": {"$in": c.version_ids()}}).count() > 0:
+                query = oref.ref_regex_query()
+                query.update({"generated_by": "add_links_from_text", "source_text_oid": {"$in": c.version_ids()}})
+                if LinkSet(query).count() > 0:
                     setattr(self, self.text_attr_map[language], c.ja().modify_by_function(lambda s: library.get_wrapped_refs_string(s, lang=language, citing_only=True)))
                 else:
                     setattr(self, self.text_attr_map[language], c.text)
@@ -1777,7 +1783,7 @@ class TextFamily(object):
             self.commentary = links if "error" not in links else []
 
         # get list of available versions of this text
-        self.versions = oref.version_list() if not oref.index_node.is_virtual else []
+        self.versions = oref.version_list()
 
         # Adds decoration for the start of each alt structure reference
         if alts:
@@ -2224,7 +2230,7 @@ class Ref(object):
         except AttributeError:
             if self.index_node.is_virtual:
                 self.index_node = self.index_node.create_dynamic_node(title, base)
-                self.sections = self.index_node.get_sections(base)
+                self.sections = self.index_node.get_sections()
                 self.toSections = self.sections[:]
                 return
 
@@ -3670,6 +3676,10 @@ class Ref(object):
         }
         if lang:
             d.update({"language": lang})
+
+        if self.index_node.is_virtual:
+            d.update({"versionTitle": self.index_node.parent.lexicon.version_title})
+            return d
 
         condition_addr = self.storage_address()
         if not isinstance(self.index_node, JaggedArrayNode):

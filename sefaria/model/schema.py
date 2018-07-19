@@ -595,7 +595,7 @@ class TitledTreeNode(TreeNode, AbstractTitledOrTermedObject):
     A tree node that has a collection of titles - as contained in a TitleGroup instance.
     In this class, node titles, terms, 'default', and combined titles are handled.
     """
-    after_title_delimiter_re = ur"[,.: \r\n]+"  # should be an arg?  \r\n are for html matches
+    after_title_delimiter_re = ur"[,.: \r\n]+(to )?"  # should be an arg?  \r\n are for html matches
     title_separators = [u", "]
 
     def __init__(self, serial=None, **kwargs):
@@ -1417,9 +1417,9 @@ class DictionaryEntryNode(TitledTreeNode):
         """
         if title and tref:
             self.title = title
-            reg = regex.compile(regex.escape(title) + self.after_title_delimiter_re  + "(\S[^.]*)(?:\.)?(\d+)?")
-            match = reg.match(tref)
-            self.word = match.group(1) or ""
+            self._ref_regex = regex.compile(regex.escape(title) + self.after_title_delimiter_re + "(\S\D*)(?:[. ])?(\d+)?")
+            self._match = self._ref_regex.match(tref)
+            self.word = self._match.group(1) or ""
         elif word:
             self.word = word
 
@@ -1449,9 +1449,14 @@ class DictionaryEntryNode(TitledTreeNode):
         else:
             self.word = "Not Found"
 
-    def get_sections(self, tref):
-        reg = regex.compile(regex.escape(self.title) + self.after_title_delimiter_re + "(\S[^.]*)(?:\.)?(\d+)?")
-        s = reg.match(tref).group(2)
+    def has_numeric_continuation(self):
+        return True
+
+    def has_titled_continuation(self):
+        return False
+
+    def get_sections(self):
+        s = self._match.group(2)
         return [int(s)] if s else []
 
     def address_class(self, depth):
@@ -1521,16 +1526,20 @@ class DictionaryNode(VirtualNode):
         :return:
         """
         super(DictionaryNode, self).__init__(serial, **kwargs)
+
+        from lexicon import LexiconEntrySubClassMapping, Lexicon
+
+        self.lexicon = Lexicon().load({"name": self.lexiconName})
+
         try:
-            from lexicon import LexiconEntrySubClassMapping
             self.dictionaryClass = LexiconEntrySubClassMapping.lexicon_class_map[self.lexiconName]
 
         except KeyError:
-            raise IndexSchemaError("No matching class for {} in DictionaryNode".format(self.dictionaryClassName))
+            raise IndexSchemaError("No matching class for {} in DictionaryNode".format(self.lexiconName))
+
 
     def _init_defaults(self):
         super(DictionaryNode, self)._init_defaults()
-        self.dictionaryClassName = None
 
     def validate(self):
         super(DictionaryNode, self).validate()
@@ -1858,7 +1867,7 @@ class AddressAliyah(AddressInteger):
 
 class AddressPerek(AddressInteger):
     section_patterns = {
-        "en": ur"""(?:(?:Chapter|chapter|Perek|perek)?\s*)""",  # the internal ? is a hack to allow a non match, even if 'strict'
+        "en": ur"""(?:(?:Chapter|chapter|Perek|perek|s\.)?\s*)""",  # the internal ? is a hack to allow a non match, even if 'strict'
         "he": ur"""(?:
             \u05e4(?:"|\u05f4|''|'\s)?                  # Peh (for 'perek') maybe followed by a quote of some sort
             |\u05e4\u05e8\u05e7(?:\u05d9\u05dd)?\s*                  # or 'perek(ym)' spelled out, followed by space
