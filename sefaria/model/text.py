@@ -22,7 +22,7 @@ except ImportError:
     import re
 
 from . import abstract as abst
-from schema import deserialize_tree, SchemaNode, JaggedArrayNode, TitledTreeNode, AddressTalmud, Term, TermSet, TitleGroup, AddressType
+from schema import deserialize_tree, SchemaNode, JaggedArrayNode, TitledTreeNode, AddressTalmud, Term, TermSet, TitleGroup, AddressType, DictionaryEntryNotFound
 from sefaria.system.database import db
 
 import sefaria.system.cache as scache
@@ -866,8 +866,13 @@ class AbstractTextRecord(object):
     """
     """
     text_attr = "chapter"
-    ALLOWED_TAGS    = ("i", "b", "br", "u", "strong", "em", "big", "small", "img", "sup", "span")
-    ALLOWED_ATTRS   = {'span':['class', 'dir'], 'i': ['data-commentator', 'data-order', 'class', 'data-label'], 'img': lambda name, value: name == 'src' and value.startswith("data:image/")}
+    ALLOWED_TAGS    = ("i", "b", "br", "u", "strong", "em", "big", "small", "img", "sup", "span", "a")
+    ALLOWED_ATTRS   = {
+        'span':['class', 'dir'],
+        'i': ['data-commentator', 'data-order', 'class', 'data-label', 'dir'],
+        'img': lambda name, value: name == 'src' and value.startswith("data:image/"),
+        'a': ['dir', 'class', 'href', 'data-ref'],
+    }
 
     def word_count(self):
         """ Returns the number of words in this text """
@@ -1548,7 +1553,6 @@ class TextChunk(AbstractTextRecord):
 
         return ref_list
 
-
     def find_string(self, regex_str, cleaner=lambda x: x, strict=True):
         """
         Regex search in TextChunk
@@ -1616,24 +1620,39 @@ class VirtualTextChunk(AbstractTextRecord):
     text_attr = "text"
 
     def __init__(self, oref, lang="en", vtitle=None, exclude_copyrighted=False):
+
         self._oref = oref
-        self.text = oref.index_node.get_text()   # <- This is where the magic happens
         self._ref_depth = len(self._oref.sections)
         self._saveable = False
 
         self.lang = lang
         self.is_merged = False
         self.sources = []
-        self._version = Version().load({
-            "title": oref.index_node.parent.lexicon.index_title,
-            "versionTitle": oref.index_node.parent.lexicon.version_title
-        })    # Currently vtitle is thrown out.  There's only one version of each lexicon.
+
+        if self.lang not in self._oref.index_node.supported_languages:
+            self.text = []
+            self._versions = []
+            return
+
+        try:
+            self.text = self._oref.index_node.get_text()  # <- This is where the magic happens
+        except:
+            self.text = []
+            self._versions = []
+            return
+
+        v = Version().load({
+            "title": self._oref.index_node.get_index_title(),
+            "versionTitle": self._oref.index_node.get_version_title(self.lang),
+            "language": self.lang
+        }, {"chapter": 0})    # Currently vtitle is thrown out.  There's only one version of each lexicon.
+        self._versions = [v] if v else []
 
     def version(self):
-        return self._version
+        return self._versions[0] if self._versions else None
 
     def version_ids(self):
-        return [self._version._id]
+        return [self._versions[0]._id] if self._versions else []
 
 
 # This was built as a bridge between the object model and existing front end code, so has some hallmarks of that legacy.
@@ -1769,7 +1788,7 @@ class TextFamily(object):
                 #then count how many links came from that version. If any- do the wrapping.
                 from . import LinkSet
                 query = oref.ref_regex_query()
-                query.update({"generated_by": "add_links_from_text", "source_text_oid": {"$in": c.version_ids()}})
+                query.update({"generated_by": "add_links_from_text"})  # , "source_text_oid": {"$in": c.version_ids()}
                 if LinkSet(query).count() > 0:
                     setattr(self, self.text_attr_map[language], c.ja().modify_by_function(lambda s: library.get_wrapped_refs_string(s, lang=language, citing_only=True)))
                 else:
@@ -2158,8 +2177,8 @@ class Ref(object):
         Populate self.index, self.index_node, self.type, self.book, self.sections, self.toSections, ...
         :return:
         """
-        # Split ranges based on '-' symbol, store in `parts` variable
-        parts = [s.strip() for s in self.tref.split("-")]
+        # Split ranges based on all '-' symbol, store in `parts` variable
+        parts = [s.strip() for s in re.split(ur"[-\u2010-\u2015]", self.tref)]
         if len(parts) > 2:
             raise InputError(u"Couldn't understand ref '{}' (too many -'s).".format(self.tref))
         if any([not p for p in parts]):
@@ -2177,11 +2196,11 @@ class Ref(object):
 
             if self.index_node:
                 title = base[0:l]
-                if base[l - 1] == "." and l < len(base):   # Take care of Refs like "Exo.14.15", where the period shouldn't get swallowed in the name.
+                if base[l - 1] == u"." and l < len(base):   # Take care of Refs like "Exo.14.15", where the period shouldn't get swallowed in the name.
                     title = base[0:l - 1]
                 break
             if new_tref:
-                if l < len(base) and base[l] not in " .":
+                if l < len(base) and base[l] not in u" .":
                     continue
                 # If a term is matched, reinit with the real tref
                 self.__reinit_tref(new_tref)
@@ -2235,7 +2254,9 @@ class Ref(object):
             reg = self.index_node.full_regex(title, self._lang, terminated=True)  # Try to treat this as a JaggedArray
         except AttributeError:
             if self.index_node.is_virtual:
+                # The line below will raise InputError (or DictionaryEntryNotFound) if no match
                 self.index_node = self.index_node.create_dynamic_node(title, base)
+                self.book = self.index_node.full_title("en")
                 self.sections = self.index_node.get_sections()
                 self.toSections = self.sections[:]
                 return
@@ -2334,7 +2355,7 @@ class Ref(object):
             self.__init_ref_pointer_vars()  # clear out any mistaken partial representations
             if self._lang == "he" or any([a != "Integer" for a in self.index_node.addressTypes[1:]]):     # in process. developing logic that should work for all languages / texts
                 # todo: handle sections names in "to" part.  Handle talmud יד א - ב kind of cases.
-                range_parts = re.split("[., ]+", parts[1])
+                range_parts = re.split(u"[., ]+", parts[1])
                 delta = len(self.sections) - len(range_parts)
                 for i in range(delta, len(self.sections)):
                     try:
@@ -2345,7 +2366,7 @@ class Ref(object):
                 if self.index_node.addressTypes[0] == "Talmud":
                     self.__parse_talmud_range(parts[1])
                 else:
-                    range_parts = re.split("[.:, ]+", parts[1])
+                    range_parts = re.split(u"[.:, ]+", parts[1])
                     delta = len(self.sections) - len(range_parts)
                     for i in range(delta, len(self.sections)):
                         try:
@@ -2372,17 +2393,17 @@ class Ref(object):
         self.toSections = range_part.split(".")  # this was converting space to '.', for some reason.
 
         # 'Shabbat 23a-b'
-        if self.toSections[0] == 'b':
+        if self.toSections[0] == u'b' or self.toSections[0] == u'ᵇ':
             self.toSections[0] = self.sections[0] + 1
 
         # 'Shabbat 24b-25a'
-        elif regex.match("\d+[ab]", self.toSections[0]):
+        elif regex.match(u"\d+[abᵃᵇ]", self.toSections[0]):
             self.toSections[0] = daf_to_section(self.toSections[0])
 
         # 'Shabbat 24b.12-24'
         else:
             delta = len(self.sections) - len(self.toSections)
-            for i in range(delta -1, -1, -1):
+            for i in range(delta - 1, -1, -1):
                 self.toSections.insert(0, self.sections[i])
 
         self.toSections = [int(x) for x in self.toSections]
@@ -2835,7 +2856,10 @@ class Ref(object):
                 while True:
                     next_leaf = current_leaf.next_leaf() #next schema/JANode
                     if next_leaf and next_leaf.is_virtual:
-                        return next_leaf.first_child().ref()
+                        if next_leaf.first_child():
+                            return next_leaf.first_child().ref()
+                        else:
+                            return None
                     if next_leaf:
                         next_node_ref = next_leaf.ref() #get a ref so we can do the next lines
                         potential_next = next_node_ref._iter_text_section(depth_up=0 if next_leaf.depth == 1 else 1)
@@ -2868,7 +2892,10 @@ class Ref(object):
                 while True:
                     prev_leaf = current_leaf.prev_leaf()  # prev schema/JANode
                     if prev_leaf and prev_leaf.is_virtual:
-                        return prev_leaf.last_child().ref()
+                        if prev_leaf.last_child():
+                            return prev_leaf.last_child().ref()
+                        else:
+                            return None
                     if prev_leaf:
                         prev_node_ref = prev_leaf.ref()  # get a ref so we can do the next lines
                         potential_prev = prev_node_ref._iter_text_section(forward=False, depth_up=0 if prev_leaf.depth == 1 else 1)
@@ -3684,13 +3711,16 @@ class Ref(object):
             d.update({"language": lang})
 
         if self.index_node.is_virtual:
-            d.update({"versionTitle": self.index_node.parent.lexicon.version_title})
+            try:
+                d.update({"versionTitle": self.index_node.parent.lexicon.version_title})
+            except:
+                pass
             return d
 
         condition_addr = self.storage_address()
         if not isinstance(self.index_node, JaggedArrayNode):
             # This will also return versions with no content in this Ref location - since on the version, there is a dictionary present.
-            # We could enter the dictionary and check each array, but it's not clear that it's neccesary.
+            # We could enter the dictionary and check each array, but it's not clear that it's necessary.
             d.update({
                 condition_addr: {"$exists": True}
             })
@@ -4281,7 +4311,7 @@ class Library(object):
         :return:
         """
 
-        index_object_title = index_object.title if isinstance(index_object, Index) else index_object
+        index_object_title = old_title if old_title else (index_object.title if isinstance(index_object, Index) else index_object)
         Ref.remove_index_from_cache(index_object_title)
 
         for lang in self.langs:
@@ -4584,10 +4614,12 @@ class Library(object):
             for title in unique_titles:
                 try:
                     res = self._build_all_refs_from_string(title, st)
+                    refs += res
                 except AssertionError as e:
                     logger.info(u"Skipping Schema Node: {}".format(title))
-                else:
-                    refs += res
+                except TypeError as e:
+                    logger.error(u"Error finding ref for {} in: {}".format(title, st))
+
         else:  # lang == "en"
             for match in self.all_titles_regex(lang, citing_only=citing_only).finditer(st):
                 title = match.group('title')
@@ -4595,12 +4627,14 @@ class Library(object):
                     continue
                 try:
                     res = self._build_ref_from_string(title, st[match.start():])  # Slice string from title start
+                    refs += res
                 except AssertionError as e:
                     logger.info(u"Skipping Schema Node: {}".format(title))
                 except InputError as e:
                     logger.info(u"Input Error searching for refs in string: {}".format(e))
-                else:
-                    refs += res
+                except TypeError as e:
+                    logger.error(u"Error finding ref for {} in: {}".format(title, st))
+
         return refs
 
     def get_wrapped_refs_string(self, st, lang=None, citing_only=False):

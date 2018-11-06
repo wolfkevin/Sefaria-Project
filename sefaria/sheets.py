@@ -26,11 +26,15 @@ import search
 import sys
 import hashlib
 import urllib
+import logging
+logger = logging.getLogger(__name__)
 
 if not hasattr(sys, '_doc_build'):
 	from django.contrib.auth.models import User
 from django.contrib.humanize.templatetags.humanize import naturaltime
 
+import logging
+logger = logging.getLogger(__name__)
 
 
 # Simple cache of the last updated time for sheets
@@ -81,11 +85,13 @@ def get_sheet_for_panel(id=None):
 	ownerData = public_user_data(sheet["owner"])
 	sheet["ownerName"]  = ownerData["name"]
 	sheet["ownerProfileUrl"] = public_user_data(sheet["owner"])["profileUrl"]
+	sheet["ownerImageUrl"] = public_user_data(sheet["owner"])["imageUrl"]
 	sheet["naturalDateCreated"] = naturaltime(datetime.strptime(sheet["dateCreated"], "%Y-%m-%dT%H:%M:%S.%f"))
+	sheet["sources"] = annotate_user_links(sheet["sources"])
 	if "group" in sheet:
 		group = Group().load({"name": sheet["group"]})
 		try:
-			sheet["groupLogo"] = group.headerUrl
+			sheet["groupLogo"] = group.imageUrl
 		except:
 			sheet["groupLogo"] = None
 	return sheet
@@ -112,15 +118,16 @@ def public_sheets(sort=[["dateModified", -1]], limit=50, skip=0):
 
 
 def group_sheets(group, authenticated):
-    if authenticated == True:
-        query = {"status": {"$in": ["unlisted", "public"]}, "group": group}
-    else:
-        query = {"status": "public", "group": group}
+	islisted = getattr(group, "listed", False)
+	if authenticated == False and islisted:
+		query = {"status": "public", "group": group.name}
+	else:
+		query = {"status": {"$in": ["unlisted", "public"]}, "group": group.name}
 
-    response = {
-        "sheets": sheet_list(query=query, sort=[["title", 1]]),
-    }
-    return response
+	response = {
+		"sheets": sheet_list(query=query, sort=[["title", 1]]),
+	}
+	return response
 
 
 def sheet_list(query=None, sort=None, skip=0, limit=None):
@@ -146,6 +153,14 @@ def sheet_list(query=None, sort=None, skip=0, limit=None):
 
 	return [sheet_to_dict(s) for s in sheets]
 
+def annotate_user_links(sources):
+	"""
+	Search a sheet for any addedBy fields (containg a UID) and add corresponding user links.
+	"""
+	for source in sources:
+		if "addedBy" in source:
+			source["userLink"] = user_link(source["addedBy"])
+	return sources
 
 def sheet_to_dict(sheet):
 	"""
@@ -209,9 +224,9 @@ def order_tags_for_user(tag_counts, uid):
 	tag_order = getattr(profile, "tag_order", None)
 	if tag_order:
 		empty_tags = tag_order[:]
-		tags = [tag_count["tag"] for tag_count in tag_counts]		
+		tags = [tag_count["tag"] for tag_count in tag_counts]
 		empty_tags = [tag for tag in tag_order if tag not in tags]
-		
+
 		for tag in empty_tags:
 			tag_counts.append({"tag": tag, "count": 0})
 		try:
@@ -283,6 +298,17 @@ def save_sheet(sheet, user_id, search_override=False):
 		sheet["owner"] = user_id
 		sheet["views"] = 1
 
+		#ensure that sheet sources have nodes (primarily for sheets posted via API)
+		nextNode = sheet.get("nextNode", 1)
+		sheet["nextNode"] = nextNode
+		checked_sources = []
+		for source in sheet["sources"]:
+			if "node" not in source:
+				source["node"] = nextNode
+				nextNode += 1
+			checked_sources.append(source)
+		sheet["sources"] = checked_sources
+
 	if status_changed:
 		if sheet["status"] == "public" and "datePublished" not in sheet:
 			# PUBLISH
@@ -304,8 +330,11 @@ def save_sheet(sheet, user_id, search_override=False):
 
 
 	if sheet["status"] == "public" and SEARCH_INDEX_ON_SAVE and not search_override:
-		index_name = search.get_new_and_current_index_names()['current']
-		search.index_sheet(index_name, sheet["id"])
+		try:
+			index_name = search.get_new_and_current_index_names("sheet")['current']
+			search.index_sheet(index_name, sheet["id"])
+		except:
+			logger.error("Failed index on " + str(sheet["id"]))
 
 	'''
 	global last_updated
@@ -330,7 +359,7 @@ def add_source_to_sheet(id, source, note=None):
 		'outsideBiText' (indicating a bilingual outside text)
 	    'comment' (indicating a comment)
 		'media' (indicating a media object)
-	if string `note` is present, add it as a coment immediately after the source. 
+	if string `note` is present, add it as a coment immediately after the source.
 		pass
 	"""
 	if not is_valid_source(source):
@@ -339,6 +368,9 @@ def add_source_to_sheet(id, source, note=None):
 	if not sheet:
 		return {"error": "No sheet with id %s." % (id)}
 	sheet["dateModified"] = datetime.now().isoformat()
+	nextNode = sheet.get("nextNode", 1)
+	source["node"] = nextNode
+	sheet["nextNode"] = nextNode + 1
 	sheet["sources"].append(source)
 	if note:
 		sheet["sources"].append({"outsideText": note, "options": {"indented": "indented-1"}})
@@ -434,7 +466,7 @@ def update_included_refs(hours=1):
 def get_top_sheets(limit=3):
 	"""
 	Returns 'top' sheets according to some magic heuristic.
-	Currently: return the most recently active sheets with more than 100 views. 
+	Currently: return the most recently active sheets with more than 100 views.
 	"""
 	query = {"status": "public", "views": {"$gte": 100}}
 	return sheet_list(query=query, limit=limit)
@@ -444,7 +476,7 @@ def get_sheets_for_ref(tref, uid=None):
 	"""
 	Returns a list of sheets that include ref,
 	formating as need for the Client Sidebar.
-	If `uid` is present return user sheets, otherwise return public sheets. 
+	If `uid` is present return user sheets, otherwise return public sheets.
 	"""
 	oref = model.Ref(tref)
 	# perform initial search with context to catch ranges that include a segment ref
@@ -496,7 +528,7 @@ def get_sheets_for_ref(tref, uid=None):
 				group = Group().load({"name": sheet["group"]})
 
 				try:
-					sheet["groupLogo"] = group.headerUrl
+					sheet["groupLogo"] = group.imageUrl
 				except:
 					sheet["groupLogo"] = None
 
@@ -542,7 +574,8 @@ def update_sheet_tags(sheet_id, tags):
 	Sets the tag list for sheet_id to those listed in list 'tags'.
 	"""
 	tags = list(set(tags)) 	# tags list should be unique
-	normalizedTags = [titlecase(tag) for tag in tags]
+	# replace | with - b/c | is a reserved char for search sheet queries when filtering on tags
+	normalizedTags = [titlecase(tag).replace('|','-') for tag in tags]
 	db.sheets.update({"id": sheet_id}, {"$set": {"tags": normalizedTags}})
 
 	return {"status": "ok"}

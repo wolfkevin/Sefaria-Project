@@ -9,14 +9,15 @@ var extend     = require('extend'),
     $          = require('./sefariaJquery');
                  require('babel-polyfill');
 
-var INBROWSER = (typeof document !== 'undefined');
 
 var Sefaria = Sefaria || {
   _dataLoaded: false,
+  _inBrowser: (typeof document !== "undefined"),
   toc: [],
   books: [],
   booksDict: {},
   recentlyViewed: [],
+
   apiHost: "" // Defaults to localhost, override to talk another server
 };
 
@@ -63,7 +64,7 @@ Sefaria = extend(Sefaria, {
               }
               break;
           }
-          if (book in Sefaria.booksDict) {
+          if (book in Sefaria.booksDict || book == "Sheet") {
               nums = first.slice(i+1);
               break;
           }
@@ -80,6 +81,7 @@ Sefaria = extend(Sefaria, {
 
       if (nums && !nums.match(/\d+[ab]?( \d+)*/)) {
           Sefaria._parseRef[q] = {"error": "Bad section string."};
+          console.log(Sefaria._parseRef[q])
           return Sefaria._parseRef[q];
       }
 
@@ -1396,7 +1398,7 @@ Sefaria = extend(Sefaria, {
               {json: JSON.stringify({recentlyViewed: packedRecent})},
               function(data) {} );
     } else {
-      var cookie = INBROWSER ? $.cookie : Sefaria.util.cookie;
+      var cookie = Sefaria._inBrowser ? $.cookie : Sefaria.util.cookie;
       packedRecent = packedRecent.slice(0, 6);
       cookie("recentlyViewed", JSON.stringify(packedRecent), {path: "/"});
     }
@@ -1545,7 +1547,7 @@ Sefaria = extend(Sefaria, {
       if (sheets) {
         if (callback) { callback(sheets); }
       } else {
-        var url = Sefaria.apiHost + "/api/sheets/tag/" + tag;
+        var url = Sefaria.apiHost + "/api/sheets/tag/" + tag.replace("#","%23");
          $.getJSON(url, function(data) {
             this._sheetsByTag[tag] = data.sheets;
             if (callback) { callback(data.sheets); }
@@ -1813,6 +1815,9 @@ Sefaria = extend(Sefaria, {
       "Please select a source sheet.": "אנא בחר דף מקורות.",
       "New Source Sheet Name:" : "כותרת דף מקורות חדש:",
       "Source Sheet by" : "דף מקורות מאת",
+      "Pinned Sheet - click to unpin": "דף מקורות נעוץ - לחצו להסרה",
+      "Pinned Sheet" : "דף מקורות נעוץ",
+      "Pin Sheet" : "נעיצת דף מקורות",
 
       //stuff moved from sheets.js
       "Loading..." : "טוען...",
@@ -1897,7 +1902,21 @@ Sefaria = extend(Sefaria, {
       "Vocalization": "טעמים וניקוד",
       "Vowels": "ניקוד",
       "Show only vowel points": "הצג טקסט עם ניקוד",
-      "Show only consonantal text": "הצג טקסט עיצורי בלבד"
+      "Show only consonantal text": "הצג טקסט עיצורי בלבד",
+      "Email Address" : "כתובת אימייל",
+      "Describe the issue..." : "טקסט המשוב",
+      "Report an issue with the text" : "דיווח על בעיה בטקסט",
+      "Report a bug" : "דיווח על תקלה באתר",
+      "Get help" : "עזרה",
+      "Request a feature": "בקשה להוספת אפשרות באתר",
+      "Give thanks": "תודה",
+      "Other": "אחר",
+      "Please enter a valid email address": "אנא הקלידו כתובת אימייל תקנית",
+      "Please select a feedback type": "אנא בחרו סוג משוב",
+      "Unfortunately, there was an error sending this feedback. Please try again or try reloading this page.": "לצערנו ארעה שגיאה בשליחת המשוב. אנא נסו שוב או רעננו את הדף הנוכחי",
+      "Select Type" : "סוג משוב",
+      "Added by" : "נוסף בידי",
+
   },
   _v: function(inputVar){
     if(Sefaria.interfaceLang != "english"){
@@ -2074,7 +2093,7 @@ Sefaria.setup = function(data) {
       Sefaria._partner_role = cookie._partner_role;
     }
     Sefaria._makeBooksDict();
-    Sefaria.virtualBooksDict = {"Jastrow": 1, "Klein Dictionary": 1};  //Todo: Wire this up to the server
+    Sefaria.virtualBooksDict = {"Jastrow": 1, "Klein Dictionary": 1, "Jastrow Unabbreviated": 1};  //Todo: Wire this up to the server
     Sefaria._cacheIndexFromToc(Sefaria.toc);
     if (!Sefaria.recentlyViewed) {
         Sefaria.recentlyViewed = [];

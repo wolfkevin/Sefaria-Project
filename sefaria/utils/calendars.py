@@ -10,6 +10,7 @@ import p929
 from sefaria.utils.util import graceful_exception
 from sefaria.utils.hebrew import encode_hebrew_numeral, hebrew_parasha_name
 import datetime
+from django.utils import timezone
 
 
 import logging
@@ -47,19 +48,24 @@ def daf_yomi(datetime_obj):
     """
     date_str = datetime_obj.strftime(" %m/ %d/%Y").replace(" 0", "").replace(" ", "")
     daf = db.dafyomi.find_one({"date": date_str})
-    rf = model.Ref(daf["daf"] + "a")
-    name =  daf["daf"]
-    daf_num = int(daf["daf"].split(" ")[-1])
-    daf_num_he = encode_hebrew_numeral(daf_num)
-    name_he = u"{} {}".format(rf.he_book(), daf_num_he)
-
-    return [{
-        'title': {'en': 'Daf Yomi', 'he': u'דף יומי'},
-        'displayValue': {'en': name, 'he': name_he},
-        'url': rf.url(),
-        'order': 3,
-        'category': rf.index.get_primary_category()
-    }]
+    daf_str = [daf["daf"]] if isinstance(daf["daf"], basestring) else daf["daf"]
+    daf_yomi = []
+    for d in daf_str:
+        rf = model.Ref(d)
+        if rf.index.get_primary_category() == "Talmud":
+            displayVal = rf.normal()[:-1] #remove the a
+            heDisplayVal = rf.he_normal()[:-2] #remove the alef and the space before it
+        else:
+            displayVal = rf.normal()
+            heDisplayVal = rf.he_normal()
+        daf_yomi.append({
+            'title': {'en': 'Daf Yomi', 'he': u'דף יומי'},
+            'displayValue': {'en': displayVal, 'he': heDisplayVal},
+            'url': rf.url(),
+            'order': 3,
+            'category': rf.index.get_primary_category()
+        })
+    return daf_yomi
 
 @graceful_exception(logger=logger, return_value=[])
 def daily_mishnayot(datetime_obj):
@@ -173,7 +179,7 @@ def get_all_calendar_items(datetime_obj, diaspora=True, custom="sephardi"):
 
 
 def get_todays_calendar_items(diaspora=True, custom=None):
-    return get_all_calendar_items(datetime.datetime.now(), diaspora=diaspora, custom=custom)
+    return get_all_calendar_items(timezone.localtime(timezone.now()), diaspora=diaspora, custom=custom)
 
 def get_keyed_calendar_items(diaspora=True, custom=None):
     cal_items = get_todays_calendar_items(diaspora=diaspora, custom=custom)

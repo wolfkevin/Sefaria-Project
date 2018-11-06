@@ -271,14 +271,18 @@ class Header extends Component {
                              <span className="int-he">התחבר</span>
                            </a>
                          </div>);
-    var vkClassActivator = this.props.interfaceLang == 'english' ? " keyboardInput" : "";
+    // Header should not show box-shadow over panels that have color line
+    var hasColorLine = ["sheets", "sheets meta"];
+    var hasBoxShadow = (!!this.state.menuOpen && hasColorLine.indexOf(this.state.menuOpen) == -1);
+    var headerInnerClasses = classNames({headerInner: 1, boxShadow: hasBoxShadow});
+    var inputClasses = classNames({search: 1, keyboardInput: this.props.interfaceLang == "english", hebrewSearch: this.props.interfaceLang == "hebrew"});
     return (<div className="header" role="banner">
-              <div className="headerInner">
+              <div className={headerInnerClasses}>
                 <div className="headerNavSection">
                     <a href="/texts" aria-label={this.state.menuOpen === "navigation" && this.state.navigationCategories.length == 0 ? "Return to text" : "Open the Sefaria Library Table of Contents" } className="library" onClick={this.handleLibraryClick}><i className="fa fa-bars"></i></a>
                     <div  className="searchBox">
                       <ReaderNavigationMenuSearchButton onClick={this.handleSearchButtonClick} />
-                      <input className={"search"+ vkClassActivator}
+                      <input className={inputClasses}
                              id="searchInput"
                              placeholder={Sefaria._("Search")}
                              onKeyUp={this.handleSearchKeyUp}
@@ -289,7 +293,7 @@ class Header extends Component {
                     </div>
                 </div>
                 <div className="headerHomeSection">
-                    <a className="home" href="/?home" ><img src="/static/img/sefaria.svg" alt="Sefaria Logo"/></a>
+                    <a className="home" href="/?home" ><img src="/static/img/logo.svg" alt="Sefaria Logo"/></a>
                 </div>
                 <div className="headerLinksSection">
                   { headerMessage }

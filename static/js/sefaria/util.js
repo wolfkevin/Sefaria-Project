@@ -2,11 +2,8 @@ const $         = require('./sefariaJquery');
 const extend    = require('extend');
 const striptags = require('striptags');
 
-if (typeof document !== 'undefined') {
-  var INBROWSER = true;
-} else {
-  var INBROWSER = false;
-}
+
+var INBROWSER = (typeof document !== 'undefined');
 
 class Util {
     static clone(obj) {
@@ -179,6 +176,11 @@ class Util {
             return striptags(this.replace(/\u00a0/g, ' ').replace(/&nbsp;/g, ' '));
            //}
         };
+
+        String.prototype.stripHtmlKeepLineBreaks = function() {
+            return striptags(this.replace(/\u00a0/g, ' ').replace(/&nbsp;/g, ' ').replace(/<p>/g, ' <p>'),['br']);
+        };
+
 
         String.prototype.escapeHtml = function() {
             return this.replace(/&/g,'&amp;')
@@ -535,7 +537,7 @@ class Util {
 
          new Sefaria.util.RefValidator($("#inlineAdd"), $("#inlineAddDialogTitle"), $("#inlineAddSourceOK"), $("#preview"));
 
-         As currently designed, the object is instantiated, and sets up its own events.
+         The object is instantiated, and sets up its own events.
          It doesn't need to be interacted with from the outside.
          */
 
@@ -567,6 +569,9 @@ class Util {
                       function (d) { response(d["completions"]); }
                   );
                 },
+                select: function(event, ui) {
+                  this._lookupAndRoute(ui.item.value);
+                }.bind(this),
                 minLength: 3
             });
     };

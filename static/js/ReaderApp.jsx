@@ -10,6 +10,7 @@ const EditGroupPage = require('./EditGroupPage');
 const Footer        = require('./Footer');
 const {
   InterruptingMessage,
+  CookiesNotification,
 }                   = require('./Misc');
 import Component from 'react-class';
 
@@ -41,14 +42,14 @@ class ReaderApp extends Component {
             currVersions:  props.initialPanels[0].currVersions,
             bookRef:       props.initialPanels[0].bookRef
         };
-      } else if (props.initialPath.indexOf("/sheets") !== -1) {
+      } else if (props.initialPath.search(/\/sheets\/\d+/g) !== -1) {
         var mode = props.initialFilter ? "SheetAndConnections" : "Sheet";
         var initialPanel = props.initialPanels && props.initialPanels.length ? props.initialPanels[0] : {};
 
         panels[0] = {
           highlightedNodes: initialPanel.highlightedNodes,
-          naturalDateCreated: initialPanel.sheet.naturalDateCreated,
-          groupLogo: initialPanel.sheet.groupLogo,
+          naturalDateCreated: initialPanel.sheet && initialPanel.sheet.naturalDateCreated,
+          groupLogo: initialPanel.sheet && initialPanel.sheet.groupLogo,
           sheetID: initialPanel.sheetID,
           sheet: initialPanel.sheet,
           refs: props.initialRefs,
@@ -75,7 +76,6 @@ class ReaderApp extends Component {
         if (mode === "SheetAndConnections") {
           panels[0].highlightedRefs = props.initialRefs;
         }
-
       }
       else {
         var mode = props.initialFilter ? "TextAndConnections" : "Text";
@@ -452,7 +452,7 @@ class ReaderApp extends Component {
           case "sheet meta":
             var sheetTitle = state.sheet.title.stripHtml();
             hist.title = Sefaria._("Sefaria Source Sheets")+": " + sheetTitle;
-            hist.url = i == 0 ? "sheets/"+ state.sheet.id+"." : "sheet&s="+ state.sheet.id;
+            hist.url = i == 0 ? "sheets/"+ state.sheet.id : "sheet&s="+ state.sheet.id;
             hist.mode = "sheet meta";
             break;
           case "extended notes":
@@ -489,7 +489,7 @@ class ReaderApp extends Component {
                 hist.mode  = "sheets tag";
               }
               else {
-                hist.url   = "sheets/tags/" + state.navigationSheetTag;
+                hist.url   = "sheets/tags/" + state.navigationSheetTag.replace("#","%23");
                 hist.title = state.navigationSheetTag + " | " + Sefaria._("Sefaria Source Sheets");
                 hist.mode  = "sheets tag";
               }
@@ -621,7 +621,7 @@ class ReaderApp extends Component {
         hist.mode     = "SheetAndConnections";
       }
       if (state.mode !== "Header") {
-        hist.lang =  state.settings.language.substring(0,2);
+        hist.lang =  state.settings.language ? state.settings.language.substring(0,2) : "bi";
       }
       histories.push(hist);
     }
@@ -741,6 +741,8 @@ class ReaderApp extends Component {
 
     $("title").html(hist.title);
     this.replaceHistory = false;
+
+    this.setPaddingForScrollbar() // Called here to save duplicate calls to shouldHistoryUpdate
   }
   makePanelState(state) {
     // Return a full representation of a single panel's state, given a partial representation in `state`
@@ -752,7 +754,7 @@ class ReaderApp extends Component {
       connectionsMode:         state.connectionsMode         || "Resources",
       currVersions:            state.currVersions            || {en:null,he:null},
       highlightedRefs:         state.highlightedRefs         || [],
-      highlightedNodes:        state.highlightedNodes        || [],
+      highlightedNodes:        state.highlightedNodes        || null,
       currentlyVisibleRef:     state.refs && state.refs.length ? state.refs[0] : null,
       recentFilters:           state.recentFilters           || state.filter || [],
       recentVersionFilters:    state.recentVersionFilters    || state.versionFilter || [],
@@ -834,6 +836,22 @@ class ReaderApp extends Component {
   setWindowWidth() {
     // console.log("Setting window width: " + $(window).outerWidth());
     this.setState({windowWidth: $(window).outerWidth()});
+  }
+  setPaddingForScrollbar() {
+    // Scrollbars take up spacing, causing the centering of panels to be slightly off
+    // compared to the header. This functions sets appropriate padding to compensate.
+    var width = Sefaria.util.getScrollbarWidth();
+    // These are the divs that actually scroll
+    var $container = $(ReactDOM.findDOMNode(this)).find(".content, .textColumn"); 
+    if (this.state.panels.length > 1) {
+      $container.css({paddingRight: "", paddingLeft: ""});
+    } else {
+      if (this.props.interfaceLang == "hebrew") {
+        $container.css({paddingRight: width, paddingLeft: 0});
+      } else {
+        $container.css({paddingRight: 0, paddingLeft: width});
+      }      
+    }
   }
   handleNavigationClick(ref, currVersions, options) {
     this.openPanel(ref, currVersions, options);
@@ -1009,7 +1027,7 @@ class ReaderApp extends Component {
       let defaultSettings = this.getDefaultPanelSettings();
       let defaultKeys = Object.keys(defaultSettings);
       for (let i of defaultKeys) {
-        console.log(i); // logs 3, 5, 7
+        //console.log(i); // logs 3, 5, 7
         if (state.settings[i] != defaultSettings[i]){
           return true;
         }
@@ -1621,6 +1639,7 @@ class ReaderApp extends Component {
               {header}
               {panels}
               {interruptingMessage}
+              <CookiesNotification />
             </div>);
   }
 }

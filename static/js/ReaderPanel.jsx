@@ -46,11 +46,8 @@ class ReaderPanel extends Component {
       var state = this.clonePanel(props.initialState);
       state["initialAnalyticsTracked"] = false;
       this.state = state;
-
       return;
-
     }
-
 
     // When this component is independent and manages itself, it takes individual initial state props, with defaults listed here.
     this.state = {
@@ -107,6 +104,13 @@ class ReaderPanel extends Component {
       var curPanel = $(".readerPanel")[this.props.panelPosition];
       $(curPanel).find(':focusable').first().focus();
     }
+
+    if (this.state.mode == "Sheet") {
+      var newSettings = this.state.settings
+      newSettings["language"] = this.state.sheet.options.language || "bilingual"
+      this.conditionalSetState({ settings: newSettings});
+    }
+
   }
   componentWillUnmount() {
     window.removeEventListener("resize", this.setWidth);
@@ -199,7 +203,7 @@ class ReaderPanel extends Component {
           this.props.onSegmentClick(Sefaria.splitRangingRef(source.ref), source.node);
         }
         else {
-          this.props.onSegmentClick("sheetRef", source.node)
+          this.props.onSegmentClick("Sheet " + this.state.sheet.id+"."+source.node, source.node)
         }
       } else {
           if (source.ref) {
@@ -208,11 +212,9 @@ class ReaderPanel extends Component {
       }
     }
   }
-
   handleSheetCitationClick(ref) {
     this.props.onCitationClick(ref);
   }
-
   handleCitationClick(citationRef, textRef) {
     if (this.props.multiPanel) {
       this.props.onCitationClick(citationRef, textRef);
@@ -244,8 +246,8 @@ class ReaderPanel extends Component {
   }
   handleSheetClick(e,sheet) {
     e.preventDefault();
-    var newSettings = this.state.settings
-    newSettings["language"] = sheet.options.language
+    var newSettings = this.state.settings;
+    newSettings["language"] = sheet.options.language;
     this.conditionalSetState({ mode: "Sheet", sheet: sheet, settings: newSettings});
   }
   showBaseText(ref, replaceHistory, currVersions={en: null, he: null}, filter=[]) {
@@ -495,9 +497,6 @@ class ReaderPanel extends Component {
     return data;
   }
   currentBook() {
-    if ("sheetRef" == this.state.refs.slice()) {
-      return "Source Sheet";
-    }
     var data = this.currentData();
     if (data) {
       return data.indexTitle;
@@ -566,12 +565,16 @@ class ReaderPanel extends Component {
     if (this.state.mode === "Text" || this.state.mode === "TextAndConnections") {
       var oref  = Sefaria.parseRef(this.state.refs[0]);
       var title = oref && oref.index ? oref.index : "empty";
+      var bookTitle = oref && oref.index ? oref.index  : "";
+      var heBookTitle = oref ? oref.heTitle : "";
       items.push(<TextColumn
           panelPosition ={this.props.panelPosition}
           srefs={this.state.refs.slice()}
           currVersions={this.state.currVersions}
           highlightedRefs={this.state.highlightedRefs}
           basetext={true}
+          bookTitle={bookTitle}
+          heBookTitle={heBookTitle}
           withContext={true}
           loadLinks={true}
           prefetchNextPrev={true}
@@ -1001,17 +1004,15 @@ class ReaderControls extends Component {
     var title = this.props.currentRef;
     if (title) {
       var oref = Sefaria.ref(title);
-      if (!oref && title != "sheetRef") {
-        // If we don't have this data yet, rerender when we do so we can set the Hebrew title
-        var ajaxObj = Sefaria.textApi(title, {context: 1}, function(data) {
-          if ("error" in data) {
-            this.props.onError(data.error);
-            return;
-          }
-          this.setState({runningQuery: null});   // This should have the effect of forcing a re-render
-        }.bind(this));
-        this.setState({runningQuery: ajaxObj});
-      }
+      // If we don't have this data yet, rerender when we do so we can set the Hebrew title
+      var ajaxObj = Sefaria.textApi(title, {context: 1}, function(data) {
+        if ("error" in data) {
+          this.props.onError(data.error);
+          return;
+        }
+        this.setState({runningQuery: null});   // This should have the effect of forcing a re-render
+      }.bind(this));
+      this.setState({runningQuery: ajaxObj});
     }
   }
   componentWillUnmount() {
@@ -1020,7 +1021,7 @@ class ReaderControls extends Component {
     }
   }
   render() {
-    var title  = this.props.sheet ? this.props.sheet.title.stripHtml().replace(/&amp;/g, '&') : this.props.currentRef;
+    var title  = this.props.sheet ? this.props.sheet.title.stripHtmlKeepLineBreaks().replace(/&amp;/g, '&').replace(/(<br>|\n)+/g,' ') : this.props.currentRef;
     var heTitle, categoryAttribution;
 
     if (title) {
@@ -1059,10 +1060,11 @@ class ReaderControls extends Component {
             interfaceLang={this.props.interfaceLang}/>
         </div>) :
       (<div className={"readerTextToc" + (categoryAttribution ? ' attributed' : '')} onClick={this.props.sheet? this.openSheetMeta : this.openTextToc}>
-        <div className="readerTextTocBox" role="heading" aria-level="1" aria-live="polite">
+        <div className={"readerTextTocBox" + (this.props.sheet ? " sheetBox":"")} role="heading" aria-level="1" aria-live="polite">
           <a href={url} aria-label={"Show table of contents for " + title} >
             { title ? (<i className="fa fa-caret-down invisible"></i>) : null }
-            { this.props.sheet? <div style={{"direction": Sefaria.hebrew.isHebrew(title) ? "rtl" :"ltr"}}><img src={"/static/img/sheet.svg"} className="sheetTocIcon" alt="" /><span>{title}</span></div> :
+            { this.props.sheet? <img src={"/static/img/sheet.svg"} className="sheetTocIcon" alt="" /> : null}
+            { this.props.sheet? <div style={{"direction": Sefaria.hebrew.isHebrew(title) ? "rtl" :"ltr"}}><span>{title}</span></div> :
             <div><span className="en">{title}</span>
             <span className="he">{heTitle}</span></div> }
             { title ? (<i className="fa fa-caret-down"></i>) : null }
