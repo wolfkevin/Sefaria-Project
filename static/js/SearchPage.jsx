@@ -45,30 +45,26 @@ class SearchPage extends Component {
                           <h1 className={classNames({"hebrewQuery": isQueryHebrew, "englishQuery": !isQueryHebrew})}>
                             &ldquo;{ this.props.query }&rdquo;
                           </h1>
-                          <div className="searchControlsBox">
-                          </div>
                           <div className="searchContent" style={style}>
                               <SearchResultList
-                                  query = { this.props.query }
-                                  appliedFilters = {this.props.appliedFilters}
-                                  onResultClick={this.props.onResultClick}
-                                  updateAppliedFilter = {this.props.updateAppliedFilter}
-                                  updateAppliedOptionField={this.props.updateAppliedOptionField}
-                                  updateAppliedOptionSort={this.props.updateAppliedOptionSort}
-                                  registerAvailableFilters={this.props.registerAvailableFilters}
-                                  availableFilters={this.props.availableFilters}
-                                  filtersValid={this.props.filtersValid}
-                                  exactField={this.props.exactField}
-                                  broadField={this.props.broadField}
-                                  field={this.props.field}
-                                  sortType={this.props.sortType}/>
+                                query={this.props.query}
+                                tab={this.props.tab}
+                                textSearchState={this.props.textSearchState}
+                                sheetSearchState={this.props.sheetSearchState}
+                                onResultClick={this.props.onResultClick}
+                                updateTab={this.props.updateTab}
+                                updateAppliedFilter = {this.props.updateAppliedFilter}
+                                updateAppliedOptionField={this.props.updateAppliedOptionField}
+                                updateAppliedOptionSort={this.props.updateAppliedOptionSort}
+                                registerAvailableFilters={this.props.registerAvailableFilters}
+                              />
                           </div>
                       </div>
                     </div>
-                    { this.props.panelsOpen === 1 ? 
+                    { this.props.panelsOpen === 1 ?
                       <footer id="footer" className={`interface-${this.props.interfaceLang} static sans`}>
                         <Footer />
-                      </footer> 
+                      </footer>
                       : null }
                   </div>
                 </div>);
@@ -76,26 +72,20 @@ class SearchPage extends Component {
 }
 SearchPage.propTypes = {
     query:                    PropTypes.string,
-    appliedFilters:           PropTypes.array,
+    tab:                      PropTypes.oneOf(["text", "sheet"]),
+    textSearchState:          PropTypes.object,
+    sheetSearchState:         PropTypes.object,
     settings:                 PropTypes.object,
     panelsOpen:               PropTypes.number,
     close:                    PropTypes.func,
     onResultClick:            PropTypes.func,
     onQueryChange:            PropTypes.func,
+    updateTab:                PropTypes.func,
     updateAppliedFilter:      PropTypes.func,
     updateAppliedOptionField: PropTypes.func,
     updateAppliedOptionSort:  PropTypes.func,
     registerAvailableFilters: PropTypes.func,
-    availableFilters:         PropTypes.array,
-    filtersValid:             PropTypes.bool,
     hideNavHeader:            PropTypes.bool,
-    exactField:               PropTypes.string,
-    broadField:               PropTypes.string,
-    field:                    PropTypes.string,
-    sortType:                 PropTypes.oneOf(["relevance","chronological"])
-};
-SearchPage.defaultProps = {
-  appliedFilters: []
 };
 
 
@@ -107,7 +97,7 @@ class SearchBar extends Component {
     }
     handleKeypress(event) {
         if (event.charCode == 13) {
-            
+
             this.updateQuery();
             // Blur search input to close keyboard
             $(ReactDOM.findDOMNode(this)).find(".readerSearch").blur();
@@ -125,13 +115,13 @@ class SearchBar extends Component {
         return (
           <div className="searchBox">
               <ReaderNavigationMenuSearchButton onClick={this.updateQuery} />
-              <input 
+              <input
                 className="readerSearch"
                   id="searchInput"
                   title="Search for Texts or Keywords Here"
                   value={this.state.query}
-                  onKeyPress={this.handleKeypress} 
-                  onChange={this.handleChange} 
+                  onKeyPress={this.handleKeypress}
+                  onChange={this.handleChange}
                   placeholder="Search"/>
           </div>
         )

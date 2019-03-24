@@ -21,14 +21,19 @@ class SheetMetadata extends Component {
   // Menu for the Table of Contents for a single text
   constructor(props) {
     super(props);
-
+    this.loadSaved();
     this.state = {
-      showLogin: false,
       sheetCopyStatus: "Copy",
       copiedSheetId: null,
-      viewerLikedSheet: this.props.sheet.likes ? this.props.sheet.likes.indexOf(Sefaria._uid) != -1 ? true : false : false,
+      sheetSaves: null,
       sheetLikeAdjustment: 0,
     };
+  }
+  componentDidMount() {
+    this._isMounted = true;
+  }
+  componentWillUnmount() {
+    this._isMounted = false;
   }
   componentDidUpdate(prevProps, prevState) {
     if ((this.props.settingsLanguage != prevProps.settingsLanguage)) {
@@ -36,6 +41,17 @@ class SheetMetadata extends Component {
 
 
     }
+  }
+  loadSaved() {
+    Sefaria.getRefSavedHistory("Sheet " + this.props.sheet.id).then(data => {
+      const sheetSaves = [];
+      for (let hist of data) {
+        sheetSaves.push(hist["uid"]);
+      }
+      if (this._isMounted) {
+        this.setState({ sheetSaves });
+      }
+    });
   }
   handleClick(e) {
     var $a = $(e.target).closest("a");
@@ -46,25 +62,6 @@ class SheetMetadata extends Component {
       this.props.close();
       this.props.showBaseText(ref, false, this.props.version, this.props.versionLanguage);
       e.preventDefault();
-    }
-  }
-
-  toggleLike() {
-    if (!Sefaria._uid) {
-        this.setState({showLogin: true});
-    } else if (!this.state.viewerLikedSheet) {
-          this.setState({
-              viewerLikedSheet: true,
-              sheetLikeAdjustment: this.state.sheetLikeAdjustment+1,
-          });
-          $.post("/api/sheets/" + this.props.sheet.id + "/like");
-
-    } else {
-          this.setState({
-              viewerLikedSheet: false,
-              sheetLikeAdjustment:  this.state.sheetLikeAdjustment-1,
-          });
-          $.post("/api/sheets/" + this.props.sheet.id + "/unlike");
     }
   }
 
@@ -124,6 +121,7 @@ class SheetMetadata extends Component {
     delete newSheet.dateModified;
     delete newSheet.likes;
     delete newSheet.naturalDateCreated;
+    delete newSheet.groupLogo;
     delete newSheet.promptedToPublish;
     delete newSheet._id;
 
@@ -143,7 +141,7 @@ class SheetMetadata extends Component {
 
   copySheet() {
     if (!Sefaria._uid) {
-      this.setState({showLogin: true});
+        this.props.toggleSignUpModal();
     } else if (this.state.sheetCopyStatus == "Copy") {
         this.setState({sheetCopyStatus: "Copying..."});
         this.ensureSheetData();
@@ -151,33 +149,33 @@ class SheetMetadata extends Component {
   }
 
   generateSheetMetaDataButtons() {
-    if (this.state.showLogin == true) {
-      return (<LoginPrompt fullPanel={true} />)
-    }
-    else {
       return (
          <div>
             <div className="int-en">
                 {Sefaria._uid == this.props.sheet.owner ?
-                    <a href={"/sheets/"+this.props.sheet.id+"?panel=0"} className="button white" role="button">Edit Sheet</a> :
-                    <a href="#" className="button white" role="button" onClick={this.toggleLike}>{this.state.viewerLikedSheet ? "Unlike" : "Like"}</a>
+                    <a href={"/sheets/"+this.props.sheet.id+"?editor=1"} className="button white" role="button">Edit Sheet</a> :
+                    null
                 }
                 <a href="#" className="button white" onClick={this.copySheet}>{this.state.sheetCopyStatus}</a>
-                <p className="oldSheetNotice"><a href={"/sheets/"+this.props.sheet.id+"?panel=0"}>View this in our old source sheet mode</a></p>
+
+                {Sefaria._uid != this.props.sheet.owner ?
+                    <a href={"/sheets/"+this.props.sheet.id+"?editor=1"} className="button white" role="button">View in Editor</a> : null }
             </div>
             <div className="int-he">
                 {Sefaria._uid == this.props.sheet.owner ?
-                    <a href={"/sheets/"+this.props.sheet.id+"?panel=0"} className="button white" role="button">ערוך</a> :
-                    <a href="#" className="button white" role="button" onClick={this.toggleLike}>{this.state.viewerLikedSheet ? Sefaria._("Unlike") : Sefaria._("Like")}</a>
+                    <a href={"/sheets/"+this.props.sheet.id+"?editor=1"} className="button white" role="button">ערוך</a> :
+                    null
                 }
                 <a href="#" className="button white" onClick={this.copySheet}>{Sefaria._(this.state.sheetCopyStatus)}</a>
-                <p className="oldSheetNotice"><a href={"/sheets/"+this.props.sheet.id+"?panel=0"}>לצפייה בדף המקורות הנוכחי בפורמט הישן</a></p>
+
+                {Sefaria._uid != this.props.sheet.owner ?
+                    <a href={"/sheets/"+this.props.sheet.id+"?editor=1"} className="button white" role="button">לתצוגת עריכה</a> : null }
+
             </div>
 
-            {this.state.sheetCopyStatus == "Copied" ? <a href={"/sheets/"+this.state.copiedSheetId+"?panel=1"}><span className="int-en">View copy &raquo;</span><span className="int-he">צפה בהעתק &raquo;</span> </a> : null}
+            {this.state.sheetCopyStatus == "Copied" ? <a href={"/sheets/"+this.state.copiedSheetId}><span className="int-en">View copy &raquo;</span><span className="int-he">צפה בהעתק &raquo;</span> </a> : null}
          </div>
       )
-    }
 
 
   }
@@ -194,7 +192,7 @@ class SheetMetadata extends Component {
       authorStatement = "Assigned by <a href='"+this.props.sheet.assignerOwnerProfileUrl + "'>" + this.props.sheet.assignerName +" Completed by <a href='" + this.props.sheet.ownerProfileUrl + "'>" + this.props.sheet.ownerName + "</a>";
     }
     else if (this.props.sheet.viaOwnerName) {
-      authorStatement = "by <a href='" + this.props.sheet.ownerProfileUrl + "'>" + this.props.sheet.ownerName + "</a> based on a <a href='/sheets/"+this.props.sheet.via+"?panel=1'>sheet</a> by <a href='"+ this.props.sheet.viaOwnerProfileUrl + "'>" + this.props.sheet.viaOwnerName+"</a>";
+      authorStatement = "by <a href='" + this.props.sheet.ownerProfileUrl + "'>" + this.props.sheet.ownerName + "</a> based on a <a href='/sheets/"+this.props.sheet.via+"'>sheet</a> by <a href='"+ this.props.sheet.viaOwnerProfileUrl + "'>" + this.props.sheet.viaOwnerName+"</a>";
     }
     else {
       authorStatement = "by <a href='" + this.props.sheet.ownerProfileUrl + "'>" + this.props.sheet.ownerName + "</a>";
@@ -236,26 +234,44 @@ class SheetMetadata extends Component {
                       <span className="he">{Sefaria.hebrewTerm("Sheets")}</span>
                     </a>
                     <div className="tocTitle" role="heading" aria-level="1">
-                      <span>{title.stripHtml()}</span>
+                      <span>{title.stripHtmlKeepLineBreaks().replace(/&amp;/g, '&').replace(/(<br>|\n)+/g,' ')}</span>
                     </div>
-                    <div className="tocDetail authorStatement" dangerouslySetInnerHTML={ {__html: authorStatement} }></div>
+
+                    <div className="tocDetail authorStatement">
+                        <div className="groupListingImageBox imageBox">
+                            <a href={this.props.sheet.ownerProfileUrl}>
+                                <img className="groupListingImage img-circle" src={this.props.sheet.ownerImageUrl} alt="Author Avatar" />
+                            </a>
+                        </div>
+                        <span dangerouslySetInnerHTML={ {__html: authorStatement} }></span>
+                    </div>
+
+                    {this.props.sheet.group && this.props.sheet.group != "" ?
+                    <div className="tocDetail authorStatement">
+                        <div className="groupListingImageBox imageBox">
+                            <a href={"/groups/"+this.props.sheet.group}>
+                                <img className="groupListingImage img-circle" src={this.props.sheet.groupLogo} alt="Group Logo" />
+                            </a>
+                        </div>
+                        <a href={"/groups/"+this.props.sheet.group}>{this.props.sheet.group}</a>
+                    </div> : null }
                     <div className="sheetMeta">
                       <div className="int-en">
-                          Created {this.props.sheet.naturalDateCreated} · {this.props.sheet.views} Views · {this.props.sheet.likes ? this.props.sheet.likes.length + this.state.sheetLikeAdjustment : 0 +this.state.sheetLikeAdjustment} Likes
+                          Created {this.props.sheet.naturalDateCreated} · {this.props.sheet.views} Views · { !!this.state.sheetSaves ? this.state.sheetSaves.length + this.state.sheetLikeAdjustment : '--'} Saves
                       </div>
                       <div className="int-he">
-                          <span>נוצר ב{this.props.sheet.naturalDateCreated} · </span>
+                          <span>נוצר {this.props.sheet.naturalDateCreated} · </span>
                           <span>{this.props.sheet.views} צפיות · </span>
-                          <span>קיבלת {this.props.sheet.likes ? this.props.sheet.likes.length + this.state.sheetLikeAdjustment : 0 + this.state.sheetLikeAdjustment } לייקים </span>
+                          <span>קיבלת {!!this.state.sheetSaves ? this.state.sheetSaves.length + this.state.sheetLikeAdjustment : '--' } לייקים </span>
                       </div>
                     </div>
 
                       {this.generateSheetMetaDataButtons()}
 
                     <div className="tocDetails">
-                      {details ? <div className="description">{details}</div> : null}
+                      {details ? <div className="description" dangerouslySetInnerHTML={ {__html: details} }></div> : null}
                     </div>
-                    {this.props.sheet.tags.length > 0 ?
+                    {this.props.sheet.tags && this.props.sheet.tags.length > 0 ?
                     <div className="tagsSection">
                         <h2 className="tagsTitle int-en">Tags</h2>
                         <div className="sheetTags int-en">

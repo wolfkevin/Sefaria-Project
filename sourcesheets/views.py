@@ -36,6 +36,7 @@ from sefaria.system.decorators import catch_error_as_json
 from sefaria.utils.util import strip_tags
 
 from reader.views import catchall
+from sefaria.sheets import clean_source, bleach_text
 
 # sefaria.model.dependencies makes sure that model listeners are loaded.
 # noinspection PyUnresolvedReferences
@@ -68,7 +69,7 @@ def new_sheet(request):
 		query = { "owner": request.user.id or -1, "assignment_id": sheet_id }
 		existingAssignment = db.sheets.find_one(query) or []
 		if "id" in existingAssignment:
-			return view_sheet(request,existingAssignment["id"])
+			return view_sheet(request,str(existingAssignment["id"]),True)
 
 		if "assignable" in db.sheets.find_one({"id": sheet_id})["options"]:
 			if db.sheets.find_one({"id": sheet_id})["options"]["assignable"] == 1:
@@ -184,15 +185,14 @@ def make_sheet_class_string(sheet):
 
 
 @ensure_csrf_cookie
-def view_sheet(request, sheet_id):
+def view_sheet(request, sheet_id, editorMode = False):
 	"""
 	View the sheet with sheet_id.
 	"""
-	panel = request.GET.get('panel', '0')
+	editor = request.GET.get('editor', '0')
+	embed = request.GET.get('embed', '0')
 
-
-
-	if panel == '1':
+	if editor != '1' and embed !='1' and editorMode is False:
 		return catchall(request, sheet_id, True)
 
 	sheet = get_sheet(sheet_id)
@@ -351,7 +351,7 @@ def assigned_sheet(request, assignment_id):
 												"viewer_is_liker": viewer_is_liker,
 												"current_url": request.get_full_path,
 											})
-
+@csrf_exempt
 def delete_sheet_api(request, sheet_id):
 	"""
 	Deletes sheet with id, only if the requester is the sheet owner.
@@ -362,13 +362,28 @@ def delete_sheet_api(request, sheet_id):
 	if not sheet:
 		return jsonResponse({"error": "Sheet %d not found." % id})
 
-	if request.user.id != sheet["owner"]:
+	if not request.user.is_authenticated:
+		key = request.POST.get("apikey")
+		if not key:
+			return jsonResponse({"error": "You must be logged in or use an API key to delete a sheet."})
+		apikey = db.apikeys.find_one({"key": key})
+		if not apikey:
+			return jsonResponse({"error": "Unrecognized API key."})
+	else:
+		apikey = None
+
+	if apikey:
+		user = User.objects.get(id=apikey["uid"])
+	else:
+		user = request.user
+
+	if user.id != sheet["owner"]:
 		return jsonResponse({"error": "Only the sheet owner may delete a sheet."})
 
 	db.sheets.remove({"id": id})
 
 	try:
-		es_index_name = search.get_new_and_current_index_names()['current']
+		es_index_name = search.get_new_and_current_index_names("sheet")['current']
 		search.delete_sheet(es_index_name, id)
 	except NewConnectionError as e:
 		logger.warn("Failed to connect to elastic search server on sheet delete.")
@@ -416,8 +431,9 @@ def groups_post_api(request, group_name=None):
 			existing.load_from_dict(group)
 			existing.save()
 		else:
-			if "-" in group["name"] or "_" in group["name"]:
-				return jsonResponse({"error": 'Group names may not contain "-" or "_".'})
+			reservedChars = ['-', '_', '|']
+			if any([c in group["name"] for c in reservedChars]):
+				return jsonResponse({"error": 'Group names may not contain the following characters: {}'.format(', '.join(reservedChars))})
 			del group["new"]
 			group["admins"] = [request.user.id]
 			group["publishers"] = []
@@ -573,6 +589,16 @@ def save_sheet_api(request):
 		else:
 			existing = None
 
+		cleaned_sources = []
+		for source in sheet["sources"]:
+			cleaned_sources.append(clean_source(source))
+		sheet["sources"] = cleaned_sources
+
+		sheet["title"] = bleach_text(sheet["title"])
+
+		if "summary" in sheet:
+			sheet["summary"] = bleach_text(sheet["summary"])
+
 		if sheet.get("group", None):
 			# Quietly enforce group permissions
 			if sheet["group"] not in [g["name"] for g in get_user_groups(user.id)]:
@@ -726,8 +752,19 @@ def add_source_to_sheet_api(request, sheet_id):
 			source.pop("versionLanguage", None)
 			source["text"] = text
 
+		else:
+			text = {}
+			tc_eng = TextChunk(ref, "en")
+			tc_heb = TextChunk(ref, "he")
 
+
+			if tc_eng:
+				text["en"] = tc_eng.ja().flatten_to_string() if tc_eng.ja().flatten_to_string() != "" else "..."
+			if tc_heb:
+				text["he"] = tc_heb.ja().flatten_to_string() if tc_heb.ja().flatten_to_string() != "" else "..."
+			source["text"] = text
 	note = request.POST.get("note", None)
+	source.pop("node", None)
 	response = add_source_to_sheet(int(sheet_id), source, note=note)
 
 	return jsonResponse(response)
@@ -968,7 +1005,7 @@ def export_to_drive(request, credential, sheet_id):
 	"""
 
 	http = credential.authorize(httplib2.Http())
-	service = build('drive', 'v3', http=http)
+	service = build('drive', 'v3', http=http, cache_discovery=False)
 
 	sheet = get_sheet(sheet_id)
 	if 'error' in sheet:

@@ -2,6 +2,8 @@
 
 # noinspection PyUnresolvedReferences
 from datetime import datetime, timedelta, date
+from elasticsearch_dsl import Search
+from elasticsearch import Elasticsearch
 from sets import Set
 from random import choice
 from pprint import pprint
@@ -16,6 +18,7 @@ from bson.json_util import dumps
 import p929
 import socket
 import bleach
+from collections import OrderedDict
 
 from django.views.decorators.cache import cache_page
 from django.template import RequestContext
@@ -30,6 +33,7 @@ from django.utils.translation import ugettext as _
 from django.views.decorators.csrf import ensure_csrf_cookie, csrf_exempt, csrf_protect, requires_csrf_token
 from django.contrib.auth.models import User
 from django import http
+from django.utils import timezone
 
 from sefaria.model import *
 from sefaria.workflows import *
@@ -37,24 +41,26 @@ from sefaria.reviews import *
 from sefaria.model.user_profile import user_link, user_started_text, unread_notifications_count_for_user, public_user_data
 from sefaria.model.group import GroupSet
 from sefaria.model.topic import get_topics
+from sefaria.model.schema import DictionaryEntryNotFound
 from sefaria.client.wrapper import format_object_for_client, format_note_object_for_client, get_notes, get_links
 from sefaria.system.exceptions import InputError, PartialRefInputError, BookNameError, NoVersionFoundError, DuplicateRecordError
 # noinspection PyUnresolvedReferences
 from sefaria.client.util import jsonResponse
 from sefaria.history import text_history, get_maximal_collapsed_activity, top_contributors, make_leaderboard, make_leaderboard_condition, text_at_revision, record_version_deletion, record_index_deletion
-from sefaria.system.decorators import catch_error_as_json
+from sefaria.system.decorators import catch_error_as_json, sanitize_get_params, json_response_decorator
 from sefaria.summaries import get_or_make_summary_node
-from sefaria.sheets import get_sheets_for_ref, public_sheets, get_sheets_by_tag, user_sheets, user_tags, recent_public_tags, sheet_to_dict, get_top_sheets, public_tag_list, group_sheets, get_sheet_for_panel
+from sefaria.sheets import get_sheets_for_ref, public_sheets, get_sheets_by_tag, user_sheets, user_tags, recent_public_tags, sheet_to_dict, get_top_sheets, public_tag_list, group_sheets, get_sheet_for_panel, annotate_user_links
 from sefaria.utils.util import list_depth, text_preview
 from sefaria.utils.hebrew import hebrew_plural, hebrew_term, encode_hebrew_numeral, encode_hebrew_daf, is_hebrew, strip_cantillation, has_cantillation
 from sefaria.utils.talmud import section_to_daf, daf_to_section
 from sefaria.datatype.jagged_array import JaggedArray
-from sefaria.utils.calendars import get_todays_calendar_items, get_keyed_calendar_items, this_weeks_parasha
+from sefaria.utils.calendars import get_all_calendar_items, get_keyed_calendar_items, this_weeks_parasha
 from sefaria.utils.util import short_to_long_lang_code, titlecase
 import sefaria.tracker as tracker
-from sefaria.system.cache import django_cache_decorator
-from sefaria.settings import USE_VARNISH, USE_NODE, NODE_HOST, DOMAIN_LANGUAGES, MULTISERVER_ENABLED
+from sefaria.system.cache import django_cache
+from sefaria.settings import USE_VARNISH, USE_NODE, NODE_HOST, DOMAIN_LANGUAGES, MULTISERVER_ENABLED, SEARCH_ADMIN
 from sefaria.system.multiserver.coordinator import server_coordinator
+from sefaria.helper.search import get_query_obj
 from django.utils.html import strip_tags
 
 if USE_VARNISH:
@@ -69,6 +75,7 @@ logger.warn("Initializing library objects.")
 library.get_toc_tree()
 library.build_full_auto_completer()
 library.build_ref_auto_completer()
+library.build_lexicon_auto_completers()
 if server_coordinator:
     server_coordinator.connect()
 #    #    #
@@ -235,10 +242,14 @@ def make_panel_dict(oref, versionEn, versionHe, filter, versionFilter, mode, **k
     return panel
 
 
-def make_search_panel_dict(query, **kwargs):
+def make_search_panel_dict(get_dict, i, **kwargs):
+    search_params = get_search_params(get_dict, i)
+    # TODO hard to pass search params related to textSearchState and sheetSearchState as those are JS objects
+    # TODO this is not such a pressing issue though
     panel = {
         "menuOpen": "search",
-        "searchQuery": query
+        "searchQuery": search_params["query"],
+        "searchTab": search_params["tab"],
     }
     panelDisplayLanguage = kwargs.get("panelDisplayLanguage")
     if panelDisplayLanguage:
@@ -252,6 +263,7 @@ def make_sheet_panel_dict(sheet_id, filter, **kwargs):
         highlighted_node = sheet_id.split(".")[1]
         sheet_id = sheet_id.split(".")[0]
 
+    db.sheets.update({"id": int(sheet_id)}, {"$inc": {"views": 1}})
     sheet = get_sheet_for_panel(int(sheet_id))
     sheet["ownerProfileUrl"] = public_user_data(sheet["owner"])["profileUrl"]
 
@@ -264,6 +276,7 @@ def make_sheet_panel_dict(sheet_id, filter, **kwargs):
         sheet["viaOwnerName"] = viaOwnerData["name"]
         sheet["viaOwnerProfileUrl"] = viaOwnerData["profileUrl"]
 
+    sheet["sources"] = annotate_user_links(sheet["sources"])
     panel = {
         "sheetID": sheet_id,
         "mode": "Sheet",
@@ -314,7 +327,6 @@ def base_props(request):
     return {
         "multiPanel": not request.user_agent.is_mobile and not "mobile" in request.GET,
         "initialPath": request.get_full_path(),
-        "recentlyViewed": user_and_notifications(request).get("recentlyViewed"),
         "loggedIn": True if request.user.is_authenticated else False, # Django 1.10 changed this to a CallableBool, so it doesnt have a direct value of True/False,
         "_uid": request.user.id,
         "interfaceLang": request.interfaceLang,
@@ -332,6 +344,7 @@ def base_props(request):
     }
 
 
+@sanitize_get_params
 def text_panels(request, ref, version=None, lang=None, sheet=None):
     """
     Handles views of ReaderApp that involve texts, connections, and text table of contents in panels.
@@ -339,6 +352,9 @@ def text_panels(request, ref, version=None, lang=None, sheet=None):
     if sheet == None:
         try:
             primary_ref = oref = Ref(ref)
+            if primary_ref.book == "Sheet":
+                sheet = True
+                ref = '.'.join(map(str, primary_ref.sections))
         except InputError:
             raise Http404
 
@@ -384,9 +400,8 @@ def text_panels(request, ref, version=None, lang=None, sheet=None):
         if not ref:
             break
         if ref == "search":
-            query = request.GET.get("q{}".format(i))
             panelDisplayLanguage = request.GET.get("lang{}".format(i), props["initialSettings"]["language"])
-            panels += [make_search_panel_dict(query, **{"panelDisplayLanguage": panelDisplayLanguage})]
+            panels += [make_search_panel_dict(request.GET, i, **{"panelDisplayLanguage": panelDisplayLanguage})]
 
         elif ref == "sheet":
             sheet_id = request.GET.get("s{}".format(i))
@@ -439,7 +454,6 @@ def text_panels(request, ref, version=None, lang=None, sheet=None):
         "initialPanels":               panels,
         "initialPanelCap":             len(panels),
         "initialQuery":                None,
-        "initialSearchFilters":        None,
         "initialSheetsTag":            None,
         "initialNavigationCategories": None,
     })
@@ -478,7 +492,7 @@ def text_panels(request, ref, version=None, lang=None, sheet=None):
     else:
         sheet = panels[0].get("sheet",{})
         title = "Sefaria Source Sheet: " + strip_tags(sheet["title"])
-        breadcrumb = "/sheets/"+str(sheet["id"])+"?panel=1"
+        breadcrumb = "/sheets/"+str(sheet["id"])
         desc = sheet.get("summary","A source sheet created with Sefaria's Source Sheet Builder")
 
 
@@ -490,7 +504,7 @@ def text_panels(request, ref, version=None, lang=None, sheet=None):
         "title":          title,
         "desc":           desc,
         "ldBreadcrumbs":  breadcrumb
-    }, RequestContext(request))
+    })
 
 def _reduce_ranged_ref_text_to_first_section(text_list):
     """
@@ -504,6 +518,8 @@ def _reduce_ranged_ref_text_to_first_section(text_list):
         text_list = text_list[0]
     return text_list
 
+
+@sanitize_get_params
 def texts_category_list(request, cats):
     """
     List of texts in a category.
@@ -542,34 +558,66 @@ def texts_category_list(request, cats):
     })
 
 
+def get_param(param, i=None):
+    return "{}{}".format(param, "" if i is None else i)
+
+
+def get_search_params(get_dict, i=None):
+    gp = get_param
+    sheet_group_search_filters = map(lambda f: urllib.unquote(f),
+                                     get_dict.get(gp("sgroupFilters", i)).split("|")) if get_dict.get(gp("sgroupFilters", i),
+                                                                                                     "") else []
+    sheet_tags_search_filters = map(lambda f: urllib.unquote(f),
+                                    get_dict.get(gp("stagsFilters", i), "").split("|")) if get_dict.get(gp("stagsFilters", i),
+                                                                                                       "") else []
+    sheet_agg_types = ['group'] * len(sheet_group_search_filters) + ['tags'] * len(
+        sheet_tags_search_filters)  # i got a tingly feeling writing this
+    text_filters = map(lambda f: urllib.unquote(f), get_dict.get(gp("tpathFilters", i)).split("|")) if get_dict.get(gp("tpathFilters", i)) else []
+    return {
+        "query": urllib.unquote(get_dict.get(gp("q", i), "")),
+        "tab": urllib.unquote(get_dict.get(gp("tab", i), "text")),
+        "textField": ("naive_lemmatizer" if get_dict.get(gp("tvar", i)) == "1" else "exact") if get_dict.get(gp("tvar", i)) else "",
+        "textSort": get_dict.get(gp("tsort", i), None),
+        "textFilters": text_filters,
+        "textFilterAggTypes": [None for _ in text_filters],  # currently unused. just needs to be equal len as text_filters
+        "sheetSort": get_dict.get(gp("ssort", i), None),
+        "sheetFilters": (sheet_group_search_filters + sheet_tags_search_filters),
+        "sheetFilterAggTypes": sheet_agg_types,
+    }
+
+
 @ensure_csrf_cookie
+@sanitize_get_params
 def search(request):
     """
     Search or Search Results page.
     """
-    search_filters = request.GET.get("filters").split("|") if request.GET.get("filters") else []
-    initialQuery   = urllib.unquote(request.GET.get("q")) if request.GET.get("q") else ""
-    field          = ("naive_lemmatizer" if request.GET.get("var") == "1" else "exact") if request.GET.get("var") else ""
-    sort           = ("chronological" if request.GET.get("sort") == "c" else "relevance") if request.GET.get("sort") else ""
+    search_params = get_search_params(request.GET)
 
     props = base_props(request)
     props.update({
         "initialMenu": "search",
-        "initialQuery": initialQuery,
-        "initialSearchFilters": search_filters,
-        "initialSearchField": field,
-        "initialSearchSortType": sort,
+        "initialQuery": search_params["query"],
+        "initialSearchTab": search_params["tab"],
+        "initialTextSearchFilters": search_params["textFilters"],
+        "initialTextSearchFilterAggTypes": search_params["textFilterAggTypes"],
+        "initialTextSearchField": search_params["textField"],
+        "initialTextSearchSortType": search_params["textSort"],
+        "initialSheetSearchFilters": search_params["sheetFilters"],
+        "initialSheetSearchFilterAggTypes": search_params["sheetFilterAggTypes"],
+        "initialSheetSearchSortType": search_params["sheetSort"]
     })
     propsJSON = json.dumps(props)
     html = render_react_component("ReaderApp", propsJSON)
     return render(request,'base.html', {
         "propsJSON": propsJSON,
         "html":      html,
-        "title":     (initialQuery + " | " if initialQuery else "") + _("Sefaria Search"),
+        "title":     (search_params["query"] + " | " if search_params["query"] else "") + _("Sefaria Search"),
         "desc":      _("Search 3,000 years of Jewish texts in Hebrew and English translation.")
     })
 
 
+@sanitize_get_params
 def sheets(request):
     """
     Source Sheets Home Page.
@@ -594,6 +642,7 @@ def sheets(request):
     })
 
 
+@sanitize_get_params
 def get_group_page(request, group, authenticated):
     props = base_props(request)
     props.update({
@@ -636,6 +685,7 @@ def my_notes(request):
     return menu_page(request, props, "myNotes", title)
 
 
+@sanitize_get_params
 def sheets_by_tag(request, tag):
     """
     Page of sheets by tag.
@@ -722,7 +772,8 @@ def group_page(request, group):
     else:
         return get_group_page(request, group.name, False)
 
-@login_required()
+
+@login_required
 def edit_group_page(request, group=None):
     if group:
         group = group.replace("-", " ").replace("_", " ")
@@ -745,7 +796,7 @@ def groups_admin_page(request):
     return render(request, "groups.html", {"groups": groups})
 
 
-
+@sanitize_get_params
 def topics_page(request):
     """
     Page of sheets by tag.
@@ -770,6 +821,7 @@ def topics_page(request):
     })
 
 
+@sanitize_get_params
 def topic_page(request, topic):
     """
     Page of sheets by tag.
@@ -799,6 +851,7 @@ def topic_page(request, topic):
     })
 
 
+@sanitize_get_params
 def menu_page(request, props, page, title="", desc=""):
     """
     View for any App page that can described with the `menuOpen` param in React
@@ -826,6 +879,21 @@ def texts_list(request):
     title = _("The Sefaria Library")
     desc  = _("Browse 1,000s of Jewish texts in the Sefaria Library by category and title.")
     return menu_page(request, props, "navigation", title, desc)
+
+
+def saved(request):
+    props = base_props(request)
+    title = _("My Saved Content")
+    desc = _("See your saved content on Sefaria")
+    return menu_page(request, props, "saved", title, desc)
+
+
+def user_history(request):
+    props = base_props(request)
+    title = _("My User History")
+    desc = _("See your user history on Sefaria")
+    return menu_page(request, props, "history", title, desc)
+
 
 def updates(request):
     props = base_props(request)
@@ -957,7 +1025,9 @@ def ld_cat_crumbs(request, cats=None, title=None, oref=None):
     })
 
 
+
 @ensure_csrf_cookie
+@sanitize_get_params
 def edit_text(request, ref=None, lang=None, version=None):
     """
     Opens a view directly to adding, editing or translating a given text.
@@ -997,6 +1067,7 @@ def edit_text(request, ref=None, lang=None, version=None):
                              })
 
 @ensure_csrf_cookie
+@sanitize_get_params
 def edit_text_info(request, title=None, new_title=None):
     """
     Opens the Edit Text Info page.
@@ -1125,42 +1196,69 @@ def texts_api(request, tref):
         layer_name = request.GET.get("layer", None)
         alts       = bool(int(request.GET.get("alts", True)))
         wrapLinks = bool(int(request.GET.get("wrapLinks", False)))
+        multiple = int(request.GET.get("multiple", 0))  # Either undefined, or a positive integer (indicating how many sections forward) or negtive integer (indicating backward)
+
+        def _get_text(oref, versionEn=versionEn, versionHe=versionHe, commentary=commentary, context=context, pad=pad,
+                      alts=alts, wrapLinks=wrapLinks, layer_name=layer_name):
+            try:
+                text = TextFamily(oref, version=versionEn, lang="en", version2=versionHe, lang2="he", commentary=commentary, context=context, pad=pad, alts=alts, wrapLinks=wrapLinks).contents()
+            except AttributeError as e:
+                oref = oref.default_child_ref()
+                text = TextFamily(oref, version=versionEn, lang="en", version2=versionHe, lang2="he", commentary=commentary, context=context, pad=pad, alts=alts, wrapLinks=wrapLinks).contents()
+            except NoVersionFoundError as e:
+                return {"error": unicode(e), "ref": oref.normal(), "enVersion": versionEn, "heVersion": versionHe}
 
 
-        try:
-            text = TextFamily(oref, version=versionEn, lang="en", version2=versionHe, lang2="he", commentary=commentary, context=context, pad=pad, alts=alts, wrapLinks=wrapLinks).contents()
-        except AttributeError as e:
-            oref = oref.default_child_ref()
-            text = TextFamily(oref, version=versionEn, lang="en", version2=versionHe, lang2="he", commentary=commentary, context=context, pad=pad, alts=alts, wrapLinks=wrapLinks).contents()
-        except NoVersionFoundError as e:
-            return jsonResponse({"error": unicode(e), "ref": oref.normal(), "enVersion": versionEn, "heVersion": versionHe}, callback=request.GET.get("callback", None))
+            # TODO: what if pad is false and the ref is of an entire book? Should next_section_ref return None in that case?
+            oref               = oref.padded_ref() if pad else oref
+            try:
+                text["next"]       = oref.next_section_ref().normal() if oref.next_section_ref() else None
+                text["prev"]       = oref.prev_section_ref().normal() if oref.prev_section_ref() else None
+            except AttributeError as e:
+                # There are edge cases where the TextFamily call above works on a default node, but the next section call here does not.
+                oref = oref.default_child_ref()
+                text["next"] = oref.next_section_ref().normal() if oref.next_section_ref() else None
+                text["prev"] = oref.prev_section_ref().normal() if oref.prev_section_ref() else None
+            text["commentary"] = text.get("commentary", [])
+            text["sheets"]     = get_sheets_for_ref(tref) if int(request.GET.get("sheets", 0)) else []
 
+            if layer_name:
+                layer = Layer().load({"urlkey": layer_name})
+                if not layer:
+                    raise InputError("Layer not found.")
+                layer_content        = [format_note_object_for_client(n) for n in layer.all(tref=tref)]
+                text["layer"]        = layer_content
+                text["layer_name"]   = layer_name
+                text["_loadSourcesFromDiscussion"] = True
+            else:
+                text["layer"] = []
 
-        # TODO: what if pad is false and the ref is of an entire book? Should next_section_ref return None in that case?
-        oref               = oref.padded_ref() if pad else oref
-        try:
-            text["next"]       = oref.next_section_ref().normal() if oref.next_section_ref() else None
-            text["prev"]       = oref.prev_section_ref().normal() if oref.prev_section_ref() else None
-        except AttributeError as e:
-            # There are edge cases where the TextFamily call above works on a default node, but the next section call here does not.
-            oref = oref.default_child_ref()
-            text["next"] = oref.next_section_ref().normal() if oref.next_section_ref() else None
-            text["prev"] = oref.prev_section_ref().normal() if oref.prev_section_ref() else None
-        text["commentary"] = text.get("commentary", [])
-        text["sheets"]     = get_sheets_for_ref(tref) if int(request.GET.get("sheets", 0)) else []
+            return text
 
-        if layer_name:
-            layer = Layer().load({"urlkey": layer_name})
-            if not layer:
-                raise InputError("Layer not found.")
-            layer_content        = [format_note_object_for_client(n) for n in layer.all(tref=tref)]
-            text["layer"]        = layer_content
-            text["layer_name"]   = layer_name
-            text["_loadSourcesFromDiscussion"] = True
+        if not multiple or abs(multiple) == 1:
+            text = _get_text(oref, versionEn=versionEn, versionHe=versionHe, commentary=commentary, context=context, pad=pad,
+                             alts=alts, wrapLinks=wrapLinks, layer_name=layer_name)
+            return jsonResponse(text, cb)
         else:
-            text["layer"] = []
+            # Return list of many sections
+            target_count = int(multiple)
+            assert target_count != 0
+            direction = "next" if target_count > 0 else "prev"
+            target_count = abs(target_count)
 
-        return jsonResponse(text, cb)
+            current = 0
+            texts = []
+
+            while current < target_count:
+                text = _get_text(oref, versionEn=versionEn, versionHe=versionHe, commentary=commentary, context=context, pad=pad,
+                             alts=alts, wrapLinks=wrapLinks, layer_name=layer_name)
+                texts += [text]
+                if not text[direction]:
+                    break
+                oref = Ref(text[direction])
+                current += 1
+
+            return jsonResponse(texts, cb)
 
     if request.method == "POST":
         j = request.POST.get("json")
@@ -1235,11 +1333,15 @@ def texts_api(request, tref):
 @catch_error_as_json
 @csrf_exempt
 def old_text_versions_api_redirect(request, tref, lang, version):
-    url = "/api/texts/{}?v{}={}".format(tref, lang, version)
+    url = u"/api/texts/{}?v{}={}".format(tref, lang, version)
     response = redirect(iri_to_uri(url), permanent=True)
     params = request.GET.urlencode()
     response['Location'] += "&{}".format(params) if params else ""
     return response
+
+
+def old_recent_redirect(request):
+    return redirect("/texts/history", permanent=True)
 
 
 @catch_error_as_json
@@ -1260,6 +1362,34 @@ def table_of_contents_api(request):
 @catch_error_as_json
 def search_filter_table_of_contents_api(request):
     return jsonResponse(library.get_search_filter_toc(), callback=request.GET.get("callback", None))
+
+@catch_error_as_json
+def search_autocomplete_redirecter(request):
+    query = request.GET.get("q", "")
+    completions_dict = get_name_completions(query, 1, False)
+    ref = completions_dict['ref']
+    object_data = completions_dict['object_data']
+    if ref:
+        response = redirect(u'/{}'.format(ref.url()), permanent=False)
+    elif object_data is not None and object_data.get('type', '') == 'Person':
+        response = redirect(u'/person/{}'.format(object_data['key']), permanent=False)
+    elif object_data is not None and object_data.get('type', '') == 'TocCategory':
+        response = redirect(u'/{}'.format(object_data['key']), permanent=False)
+    else:
+        response = redirect(u'/search?q={}'.format(query), permanent=False)
+    return response
+
+
+@catch_error_as_json
+def opensearch_suggestions_api(request):
+    # see here for docs: http://www.opensearch.org/Specifications/OpenSearch/Extensions/Suggestions/1.1
+    query = request.GET.get("q", "")
+    completions_dict = get_name_completions(query, 5, False)
+    ret_data = [
+        query,
+        completions_dict["completions"]
+    ]
+    return jsonResponse(ret_data, callback=request.GET.get("callback", None))
 
 
 @catch_error_as_json
@@ -1347,28 +1477,32 @@ def index_api(request, title, v2=False, raw=False):
 
 
 @catch_error_as_json
+@json_response_decorator
+@django_cache(default_on_miss = True)
 def bare_link_api(request, book, cat):
-
     if request.method == "GET":
-        resp = jsonResponse(get_book_link_collection(book, cat), callback=request.GET.get("callback", None))
-        resp['Content-Type'] = "application/json; charset=utf-8"
+        resp = get_book_link_collection(book, cat)
         return resp
 
     elif request.method == "POST":
-        return jsonResponse({"error": "Not implemented."})
+        return {"error": "Not implemented."}
 
 
 @catch_error_as_json
+@json_response_decorator
+@django_cache(default_on_miss = True)
 def link_count_api(request, cat1, cat2):
     """
     Return a count document with the number of links between every text in cat1 and every text in cat2
     """
     if request.method == "GET":
-        resp = jsonResponse(get_link_counts(cat1, cat2))
+        resp = get_link_counts(cat1, cat2)
         return resp
 
     elif request.method == "POST":
-        return jsonResponse({"error": "Not implemented."})
+        return {"error": "Not implemented."}
+
+
 
 
 @catch_error_as_json
@@ -1432,7 +1566,6 @@ def shape_api(request, title):
     The "depth" parameter in the query string indicates how many levels in the category tree to descend.  Default is 2.
     If depth == 0, descends to end of tree
     The "dependents" parameter, if true, includes dependent texts.  By default, they are filtered out.
-
     """
 
     def _simple_shape(snode):
@@ -1441,12 +1574,46 @@ def shape_api(request, title):
 
         return {
             "section": snode.index.categories[-1],
-            "heTitle": snode.primary_title("he"),
-            "title": snode.primary_title("en"),
+            "heTitle": snode.full_title("he"),
+            "title": snode.full_title("en"),
             "length": len(shape) if isinstance(shape, list) else 1,  # hmmmm
             "chapters": shape,
             "book": snode.index.title,
+            "heBook": snode.index.get_title(lang="he"),
         }
+
+    def _collapse_book_leaf_shapes(leaf_shapes):
+        """Groups leaf node shapes for a single book into one object so that resulting list corresponds 1:1 to books"""
+        if type(leaf_shapes) != list:
+            return leaf_shapes
+
+        results = []
+        prev_shape = None
+        complex_book_in_progress = None
+
+        for shape in leaf_shapes:
+            if prev_shape and prev_shape["book"] != shape["book"]:
+                if complex_book_in_progress:
+                    results.append(complex_book_in_progress)
+                    complex_book_in_progress = None
+                else:
+                    results.append(prev_shape)
+            elif prev_shape:
+                complex_book_in_progress = complex_book_in_progress or {
+                    "isComplex": True,
+                    "section": prev_shape["section"],
+                    "length": prev_shape["length"],
+                    "chapters": [prev_shape],
+                    "book": prev_shape["book"],
+                    "heBook": prev_shape["heBook"],
+                }
+                complex_book_in_progress["chapters"].append(shape)
+                complex_book_in_progress["length"] += shape["length"]
+            prev_shape = shape
+
+        results.append(complex_book_in_progress or prev_shape)
+
+        return results
 
     title = title.replace("_", " ")
 
@@ -1455,7 +1622,7 @@ def shape_api(request, title):
 
         # Leaf Node
         if sn and not sn.children:
-            res = _simple_shape(sn)
+            res = [_simple_shape(sn)]
 
         # Branch Node
         elif sn and sn.children:
@@ -1477,6 +1644,7 @@ def shape_api(request, title):
 
                 res = [_simple_shape(jan) for toc_index in leaves for jan in toc_index.get_index_object().nodes.get_leaf_nodes()]
 
+        res = _collapse_book_leaf_shapes(res)
         return jsonResponse(res, callback=request.GET.get("callback", None))
 
 
@@ -1721,7 +1889,7 @@ def related_api(request, tref):
         response = {
             "links": get_links(tref, with_text=False),
             "sheets": get_sheets_for_ref(tref),
-            "notes": [] # get_notes(oref, public=True) # Hiding public notes for now
+            "notes": [],  # get_notes(oref, public=True) # Hiding public notes for now
         }
     return jsonResponse(response, callback=request.GET.get("callback", None))
 
@@ -1755,6 +1923,11 @@ def version_status_api(request):
     return jsonResponse(sorted(res, key = lambda x: x["title"] + x["version"]), callback=request.GET.get("callback", None))
 
 
+
+simplified_toc = {}
+
+@json_response_decorator
+@django_cache(default_on_miss = True)
 def version_status_tree_api(request, lang=None):
     def simplify_toc(toc_node, path):
         simple_nodes = []
@@ -1766,6 +1939,8 @@ def version_status_tree_api(request, lang=None):
                 "path": node_path
             }
             if "category" in x:
+                if "contents" not in x:
+                    continue
                 simple_node["type"] = "category"
                 simple_node["children"] = simplify_toc(x["contents"], node_path)
             elif "title" in x:
@@ -1774,20 +1949,23 @@ def version_status_tree_api(request, lang=None):
                     query["language"] = lang
                 simple_node["type"] = "index"
                 simple_node["children"] = [{
-                       "name": u"{} ({})".format(v.versionTitle, v.language),
-                       "path": node_path + [u"{} ({})".format(v.versionTitle, v.language)],
-                       "size": v.word_count(),
-                       "type": "version"
-                   } for v in VersionSet(query)]
+                    "name": u"{} ({})".format(v.versionTitle, v.language),
+                    "path": node_path + [u"{} ({})".format(v.versionTitle, v.language)],
+                    "size": v.word_count(),
+                    "type": "version"
+                } for v in VersionSet(query)]
             simple_nodes.append(simple_node)
         return simple_nodes
-    return jsonResponse({
+
+    result = simplify_toc(library.get_toc(), [])
+    return {
         "name": "Whole Library" + " ({})".format(lang) if lang else "",
         "path": [],
-        "children": simplify_toc(library.get_toc(), [])
-    }, callback=request.GET.get("callback", None))
+        "children": result
+    }
 
 
+@sanitize_get_params
 def visualize_library(request, lang=None, cats=None):
 
     template_vars = {"lang": lang or "",
@@ -1812,6 +1990,14 @@ def visualize_links_through_rashi(request):
 def talmudic_relationships(request):
     json_file = "../static/files/talmudic_relationships_data.json"
     return render(request,'talmudic_relationships.html', {"json_file": json_file})
+
+def sefer_hachinukh_mitzvot(request):
+    csv_file = "../static/files/mitzvot.csv"
+    return render(request,'sefer_hachinukh_mitzvot.html', {"csv": csv_file})
+
+def unique_words_viz(request):
+    csv_file = "../static/files/commentators_torah_unique_words.csv"
+    return render(request,'unique_words_viz.html', {"csv": csv_file})
 
 @catch_error_as_json
 def set_lock_api(request, tref, lang, version):
@@ -1986,13 +2172,26 @@ def category_api(request, path=None):
 @csrf_exempt
 def calendars_api(request):
     if request.method == "GET":
+        import datetime
         diaspora = request.GET.get("diaspora", "1")
+        custom = request.GET.get("custom", None)
+        try:
+            year = int(request.GET.get("year", None))
+            month = int(request.GET.get("month", None))
+            day = int(request.GET.get("day", None))
+            datetimeobj = datetime.datetime(year, month, day)
+        except Exception as e:
+            datetimeobj = timezone.localtime(timezone.now())
+
         if diaspora not in ["0", "1"]:
             return jsonResponse({"error": "'Diaspora' parameter must be 1 or 0."})
         else:
             diaspora = True if diaspora == "1" else False
-            calendars = get_todays_calendar_items(diaspora=diaspora)
-            return jsonResponse(calendars, callback=request.GET.get("callback", None))
+            calendars = get_all_calendar_items(datetimeobj, diaspora=diaspora, custom=custom)
+            return jsonResponse({"date": datetimeobj.date().isoformat(),
+                                 "timezone" : timezone.get_current_timezone_name(),
+                                 "calendar_items": calendars},
+                                callback=request.GET.get("callback", None))
 
 
 @catch_error_as_json
@@ -2054,6 +2253,47 @@ def terms_api(request, name):
     return jsonResponse({"error": "Unsupported HTTP method."})
 
 
+def get_name_completions(name, limit, ref_only):
+    lang = "he" if is_hebrew(name) else "en"
+    completer = library.ref_auto_completer(lang) if ref_only else library.full_auto_completer(lang)
+    object_data = None
+    ref = None
+    try:
+        ref = Ref(name)
+        inode = ref.index_node
+
+        # Find possible dictionary entries.  This feels like a messy way to do this.  Needs a refactor.
+        if inode.is_virtual and inode.parent and getattr(inode.parent, "lexiconName", None) in library._lexicon_auto_completer:
+            base_title = inode.parent.full_title()
+            lexicon_ac = library.lexicon_auto_completer(inode.parent.lexiconName)
+            t = [base_title + u", " + t[1] for t in lexicon_ac.items(inode.word)[:limit or None]]
+            completions = list(OrderedDict.fromkeys(t))  # filter out dupes
+        else:
+            completions = [name.capitalize()] + completer.next_steps_from_node(name)
+
+        if limit == 0 or len(completions) < limit:
+            current = {t: 1 for t in completions}
+            additional_results = completer.complete(name, limit)
+            for res in additional_results:
+                if res not in current:
+                    completions += [res]
+    except DictionaryEntryNotFound as e:
+        # A dictionary beginning, but not a valid entry
+        lexicon_ac = library.lexicon_auto_completer(e.lexicon_name)
+        t = [e.base_title + u", " + t[1] for t in lexicon_ac.items(e.word)[:limit or None]]
+        completions = list(OrderedDict.fromkeys(t))  # filter out dupes
+    except InputError:
+        completions = completer.complete(name, limit)
+        object_data = completer.get_data(name)
+
+    return {
+        "completions": completions,
+        "lang": lang,
+        "object_data": object_data,
+        "ref": ref
+    }
+
+
 @catch_error_as_json
 def name_api(request, name):
     if request.method != "GET":
@@ -2062,25 +2302,12 @@ def name_api(request, name):
     # Number of results to return.  0 indicates no limit
     LIMIT = int(request.GET.get("limit", 16))
     ref_only = request.GET.get("ref_only", False)
-    lang = "he" if is_hebrew(name) else "en"
-
-    completer = library.ref_auto_completer(lang) if ref_only else library.full_auto_completer(lang)
-    try:
-        ref = Ref(name)
+    completions_dict = get_name_completions(name, LIMIT, ref_only)
+    ref = completions_dict["ref"]
+    if ref:
         inode = ref.index_node
-        assert isinstance(inode, SchemaNode)
-
-        completions = [name.capitalize()] + completer.next_steps_from_node(name)
-
-        if LIMIT == 0 or len(completions) < LIMIT:
-            current = {t: 1 for t in completions}
-            additional_results = completer.complete(name, LIMIT)
-            for res in additional_results:
-                if res not in current:
-                    completions += [res]
-
         d = {
-            "lang": lang,
+            "lang": completions_dict["lang"],
             "is_ref": True,
             "is_book": ref.is_book_level(),
             "is_node": len(ref.sections) == 0,
@@ -2098,7 +2325,7 @@ def name_api(request, name):
             "toSections": ref.normal_toSections(),
             # "number_follows": inode.has_numeric_continuation(),
             # "titles_follow": titles_follow,
-            "completions": completions[:LIMIT],
+            "completions": completions_dict["completions"] if LIMIT == 0 else completions_dict["completions"][:LIMIT],
             # todo: ADD textual completions as well
             "examples": []
         }
@@ -2109,21 +2336,44 @@ def name_api(request, name):
             d["addressExamples"] = [t.toStr("en", 3*i+3) for i,t in enumerate(inode._addressTypes)]
             d["heAddressExamples"] = [t.toStr("he", 3*i+3) for i,t in enumerate(inode._addressTypes)]
 
-    except InputError:
+    else:
         # This is not a Ref
         d = {
-            "lang": lang,
+            "lang": completions_dict["lang"],
             "is_ref": False,
-            "completions": completer.complete(name, LIMIT)
+            "completions": completions_dict["completions"]
         }
 
         # let's see if it's a known name of another sort
-        object_data = completer.get_data(name)
-        if object_data:
-            d["type"] = object_data["type"]
-            d["key"] = object_data["key"]
+        if completions_dict["object_data"]:
+            d["type"] = completions_dict["object_data"]["type"]
+            d["key"] = completions_dict["object_data"]["key"]
 
     return jsonResponse(d)
+
+
+@catch_error_as_json
+def dictionary_completion_api(request, word, lexicon=None):
+    """
+    Given a dictionary, looks up the word in that dictionary
+    :param request:
+    :param word:
+    :param dictionary:
+    :return:
+    """
+    if request.method != "GET":
+        return jsonResponse({"error": "Unsupported HTTP method."})
+
+    # Number of results to return.  0 indicates no limit
+    LIMIT = int(request.GET.get("limit", 10))
+
+    if lexicon is None:
+        ac = library.cross_lexicon_auto_completer()
+        rs = ac.complete(word, LIMIT)
+        result = [[r, ac.title_trie[ac.normalizer(r)]["key"]] for r in rs]
+    else:
+        result = library.lexicon_auto_completer(lexicon).items(word)[:LIMIT]
+    return jsonResponse(result)
 
 
 @catch_error_as_json
@@ -2477,6 +2727,7 @@ def recommend_topics_api(request, ref_list=None):
 
 
 @ensure_csrf_cookie
+@sanitize_get_params
 def global_activity(request, page=1):
     """
     Recent Activity page listing all recent actions and contributor leaderboards.
@@ -2511,6 +2762,7 @@ def global_activity(request, page=1):
 
 
 @ensure_csrf_cookie
+@sanitize_get_params
 def user_activity(request, slug, page=1):
     """
     Recent Activity page for a single user.
@@ -2549,6 +2801,7 @@ def user_activity(request, slug, page=1):
 
 
 @ensure_csrf_cookie
+@sanitize_get_params
 def segment_history(request, tref, lang, version, page=1):
     """
     View revision history for the text segment named by ref / lang / version.
@@ -2619,6 +2872,7 @@ def leaderboard(request):
 
 
 @ensure_csrf_cookie
+@sanitize_get_params
 def user_profile(request, username, page=1):
     """
     User's profile page.
@@ -2702,6 +2956,109 @@ def profile_api(request):
     return jsonResponse({"error": "Unsupported HTTP method."})
 
 
+@catch_error_as_json
+def profile_sync_api(request):
+    """
+    API for syncing history and settings with your profile
+    Required POST fields: settings, last_synce
+    POST payload should look like
+    {
+        settings: {..., time_stamp},
+        user_history: [{...},...],
+        last_sync: ...
+    }
+    """
+    if not request.user.is_authenticated:
+        return jsonResponse({"error": _("You must be logged in to update your profile.")})
+    # fields in the POST req which can be synced
+    syncable_fields = ["settings", "user_history"]
+    if request.method == "POST":
+        post = request.POST
+        from sefaria.utils.util import epoch_time
+        now = epoch_time()
+        no_return = request.GET.get("no_return", False)
+        profile = UserProfile(id=request.user.id)
+        if not no_return:
+            # send back items after `last_sync`
+            last_sync = json.loads(post.get("last_sync", str(profile.last_sync_web)))
+            uhs = UserHistorySet({"uid": request.user.id, "server_time_stamp": {"$gt": last_sync}})
+            ret = {"last_sync": now, "user_history": [uh.contents() for uh in uhs.array()]}
+            if "last_sync" not in post:
+                # request was made from web. update last_sync on profile
+                profile.update({"last_sync_web": now})
+                profile.save()
+        else:
+            ret = {}
+        # sync items from request
+        for field in syncable_fields:
+            if field not in post:
+                continue
+            field_data = json.loads(post[field])
+            if field == "settings":
+                if field_data["time_stamp"] > profile.attr_time_stamps[field]:
+                    # this change happened after other changes in the db
+                    profile.update({
+                        field: field_data,
+                        "attr_time_stamps": profile.attr_time_stamps.update({field: field_data["time_stamp"]})
+                    })
+                    ret["settings"] = profile.settings
+            elif field == "user_history":
+                for hist in field_data:
+                    uh = UserHistory.save_history_item(request.user.id, hist, now)
+                    ret["created"] = uh.contents(for_api=True)
+        return jsonResponse(ret)
+
+    return jsonResponse({"error": "Unsupported HTTP method."})
+
+
+def get_url_params_user_history(request):
+    saved = request.GET.get("saved", None)
+    if saved is not None:
+        saved = bool(int(saved))
+    secondary = request.GET.get("secondary", None)
+    if secondary is not None:
+        secondary = bool(int(secondary))
+    last_place = request.GET.get("last_place", None)
+    if last_place is not None:
+        last_place = bool(int(last_place))
+    tref = request.GET.get("tref", None)
+    oref = Ref(tref) if tref else None
+    return saved, secondary, last_place, oref
+
+
+def saved_history_for_ref(request):
+    """
+    GET API for saved history of a ref
+    :tref: Ref associated with history item
+    """
+    if request.method == "GET":
+        _, _, _, oref = get_url_params_user_history(request)
+        if oref is None:
+            return jsonResponse({"error": "Must specify 'tref' param"})
+        return jsonResponse(UserHistory.get_user_history(oref=oref, saved=True, serialized=True))
+    return jsonResponse({"error": "Unsupported HTTP method."})
+
+
+def profile_get_user_history(request):
+    """
+    GET API for user history for a particular user. optional URL params are
+    :saved: bool. True if you only want saved items. None if you dont care
+    :secondary: bool. True if you only want secondary items. None if you dont care
+    :tref: Ref associated with history item
+    """
+    if not request.user.is_authenticated:
+        import urlparse
+        recents = json.loads(urlparse.unquote(request.COOKIES.get("recentlyViewed", '[]')))  # for backwards compat
+        recents = UserProfile.transformOldRecents(None, recents)
+        history = json.loads(urlparse.unquote(request.COOKIES.get("user_history", '[]')))
+        return jsonResponse(history + recents)
+    if request.method == "GET":
+        saved, secondary, last_place, oref = get_url_params_user_history(request)
+        user = UserProfile(id=request.user.id)
+        return jsonResponse(user.get_user_history(oref=oref, saved=saved, secondary=secondary, serialized=True, last_place=last_place))
+    return jsonResponse({"error": "Unsupported HTTP method."})
+
+
 def profile_redirect(request, uid, page=1):
     """"
     Redirect to the profile of the logged in user.
@@ -2762,13 +3119,13 @@ def home(request):
     Homepage
     """
     recent = request.COOKIES.get("recentlyViewed", None)
-    if recent and not "home" in request.GET:
+    last_place = request.COOKIES.get("user_history", None)
+    if (recent or last_place or request.user.is_authenticated) and not "home" in request.GET:
         return redirect("/texts")
 
     if request.user_agent.is_mobile:
         return mobile_home(request)
 
-    today     = date.today()
     calendar_items = get_keyed_calendar_items(request.diaspora)
     daf_today = calendar_items["Daf Yomi"]
     parasha   = calendar_items["Parashat Hashavua"]
@@ -2848,6 +3205,7 @@ def dashboard(request):
 
 
 @ensure_csrf_cookie
+@sanitize_get_params
 def translation_requests(request, completed_only=False, featured_only=False):
     """
     Page listing all outstnading translation requests.
@@ -2946,6 +3304,7 @@ def translation_request_api(request, tref):
 
 
 @ensure_csrf_cookie
+@sanitize_get_params
 def translation_flow(request, tref):
     """
     Assign a user a paritcular bit of text to translate within 'ref',
@@ -3099,6 +3458,7 @@ def translation_flow(request, tref):
 
 
 @ensure_csrf_cookie
+@sanitize_get_params
 def contest_splash(request, slug):
     """
     Splash page for contest.
@@ -3173,6 +3533,21 @@ def digitized_by_sefaria(request):
                                 })
 
 
+def parashat_hashavua_redirect(request):
+    """ Redirects to this week's Parashah"""
+    diaspora = request.GET.get("diaspora", "1")
+    calendars = get_keyed_calendar_items() # TODO Support israel / customs
+    parashah = calendars["Parashat Hashavua"]
+    return redirect(iri_to_uri("/" + parashah["url"]), permanent=False)
+
+
+def daf_yomi_redirect(request):
+    """ Redirects to today's Daf Yomi"""
+    calendars = get_keyed_calendar_items()
+    daf_yomi = calendars["Daf Yomi"]
+    return redirect(iri_to_uri("/" + daf_yomi["url"]), permanent=False)
+
+
 def random_ref():
     """
     Returns a valid random ref within the Sefaria library.
@@ -3218,7 +3593,13 @@ def random_by_topic_api(request):
     """
     Returns Texts API data for a random text taken from popular topic tags
     """
-    random_topic = choice(filter(lambda x: x['count'] > 15, get_topics().list()))['tag']
+    cb = request.GET.get("callback", None)
+    topics_filtered = filter(lambda x: x['count'] > 15, get_topics().list())
+    if len(topics_filtered) == 0:
+        resp = jsonResponse({"ref": None, "topic": None, "url": None}, callback=cb)
+        resp['Content-Type'] = "application/json; charset=utf-8"
+        return resp
+    random_topic = choice(topics_filtered)['tag']
     random_source = choice(get_topics().get(random_topic).contents()['sources'])[0]
     try:
         oref = Ref(random_source)
@@ -3226,10 +3607,89 @@ def random_by_topic_api(request):
         url = oref.url()
     except Exception:
         return random_by_topic_api(request)
-    cb = request.GET.get("callback", None)
-    resp = jsonResponse({"ref": tref, "topic": random_topic, "url": url}, callback=request.GET.get("callback", None))
+    resp = jsonResponse({"ref": tref, "topic": random_topic, "url": url}, callback=cb)
     resp['Content-Type'] = "application/json; charset=utf-8"
     return resp
+
+@csrf_exempt
+def dummy_search_api(request):
+    # Thou shalt upgrade thine app or thou shalt not glean the results of search thou seeketh
+    # this api is meant to information users of the old search.sefaria.org to upgrade their apps to get search to work again
+    were_sorry = u"We're sorry, but your version of the app is no longer compatible with our new search. We recommend you upgrade the Sefaria app to fully enjoy all it has to offer <br> עמכם הסליחה, אך גרסת האפליקציה הנמצאת במכשירכם איננה תואמת את מנוע החיפוש החדש. אנא עדכנו את אפליקצית ספריא להמשך שימוש בחיפוש"
+    resp = jsonResponse({
+        "took": 613,
+        "timed_out": False,
+        "_shards": {
+            "total": 5,
+            "successful": 5,
+            "skipped": 0,
+            "failed": 0
+        },
+        "hits": {
+            "total": 1,
+            "max_score": 1234,
+            "hits": [
+                {
+                    "_index": "merged-c",
+                    "_type": "text",
+                    "_id": "yoyo [he]",
+                    "_score": 1,
+                    "_source": {
+                        "titleVariants": ["Upgrade"],
+                        "path": "Tanakh/Torah/Genesis",
+                        "version_priority": 0,
+                        "content": were_sorry,
+                        "exact": were_sorry,
+                        "naive_lemmatizer": were_sorry,
+                        "comp_date": -1400,
+                        "categories": ["Tanakh", "Torah"],
+                        "lang": "he",
+                        "pagesheetrank": 1,
+                        "ref": "Genesis 1:1",
+                        "heRef": u"בראשית א:א",
+                        "version": None,
+                        "order":"A00000100220030"
+                    },
+                    "highlight": {
+                        "content": [
+                            were_sorry
+                        ],
+                        "exact": [
+                            were_sorry
+                        ],
+                        "naive_lemmatizer": [
+                            were_sorry
+                        ]
+                    }
+                }
+            ]
+        },
+        "aggregations": {
+            "category": {
+                "buckets": []
+            }
+        }
+    })
+    resp['Content-Type'] = "application/json; charset=utf-8"
+    return resp
+
+
+@csrf_exempt
+def search_wrapper_api(request):
+    if request.method == "POST":
+        if "json" in request.POST:
+            j = request.POST.get("json")  # using form-urlencoded
+        else:
+            j = request.body  # using content-type: application/json
+        j = json.loads(j)
+        es_client = Elasticsearch(SEARCH_ADMIN)
+        search_obj = Search(using=es_client, index=j.get("type")).params(request_timeout=5)
+        search_obj = get_query_obj(search_obj=search_obj, **{k: v for k, v in j.items()})
+        response = search_obj.execute()
+        if response.success():
+            return jsonResponse(response.to_dict(), callback=request.GET.get("callback", None))
+        return jsonResponse({"error": "Error with connection to Elasticsearch. Total shards: {}, Shards successful: {}, Timed out: {}".format(response._shards.total, response._shards.successful, response.timed_out)}, callback=request.GET.get("callback", None))
+    return jsonResponse({"error": "Unsupported HTTP method."}, callback=request.GET.get("callback", None))
 
 
 @ensure_csrf_cookie
@@ -3241,7 +3701,7 @@ def serve_static(request, page):
 
 
 @ensure_csrf_cookie
-def explore(request, book1, book2, lang=None):
+def explore(request, topCat, bottomCat, book1, book2, lang=None):
     """
     Serve the explorer, with the provided deep linked books
     """
@@ -3250,7 +3710,92 @@ def explore(request, book1, book2, lang=None):
         if book:
             books.append(book)
 
-    template_vars =  {"books": json.dumps(books)}
+    if not topCat and not bottomCat:
+        topCat, bottomCat = "Tanakh", "Bavli"
+        urlRoot = "/explore"
+    else:
+        urlRoot = "/explore-" + topCat + "-and-" + bottomCat
+
+    (topCat, bottomCat) = [x.replace("-","") for x in (topCat, bottomCat)]
+
+    categories = {
+        "Tanakh": {
+            "title": "Tanakh",
+            "heTitle": 'התנ"ך',
+            "shapeParam": "Tanakh",
+            "linkCountParam": "Tanakh",
+        },
+        "Torah": {
+            "title": "Torah",
+            "heTitle": 'תורה',
+            "shapeParam": "Tanakh/Torah",
+            "linkCountParam": "Torah",
+        },
+        "Bavli": {
+            "title": "Talmud",
+            "heTitle": "התלמוד",
+            "shapeParam": "Talmud/Bavli",
+            "linkCountParam": "Bavli",
+            "talmudAddressed": True,
+        },
+        "Yerushalmi": {
+            "title": "Jerusalem Talmud",
+            "heTitle": "התלמוד ירושלמי",
+            "shapeParam": "Talmud/Yerushalmi",
+            "linkCountParam": "Yerushalmi",
+            "talmudAddressed": True,
+        },
+        "Mishnah": {
+            "title": "Mishnah",
+            "heTitle": "המשנה",
+            "shapeParam": "Mishnah",
+            "linkCountParam": "Mishnah",
+        },
+        "Tosefta": {
+            "title": "Tosefta",
+            "heTitle": "התוספתא",
+            "shapeParam": "Tanaitic/Tosefta",
+            "linkCountParam": "Tosefta",
+        },
+        "MidrashRabbah": {
+            "title": "Midrash Rabbah",
+            "heTitle": "מדרש רבה",
+            "shapeParam": "Midrash/Aggadic Midrash/Midrash Rabbah",
+            "linkCountParam": "Midrash Rabbah",
+            "colorByBook": True,
+        },
+        "MishnehTorah": {
+            "title": "Mishneh Torah",
+            "heTitle": "משנה תורה",
+            "shapeParam": "Halakhah/Mishneh Torah",
+            "linkCountParam": "Mishneh Torah",
+            "labelBySection": True,
+        },
+        "ShulchanArukh": {
+            "title": "Shulchan Arukh",
+            "heTitle": "השולחן ערוך",
+            "shapeParam": "Halakhah/Shulchan Arukh",
+            "linkCountParam": "Shulchan Arukh",
+            "colorByBook": True,
+        },
+        "Zohar": {
+            "title": "Zohar",
+            "heTitle": "הזוהר",
+            "shapeParam": "Zohar",
+            "linkCountParam": "Zohar",
+            "talmudAddressed": True,
+        },
+    }
+
+    template_vars =  {
+        "books": json.dumps(books),
+        "categories": json.dumps(categories),
+        "topCat": topCat,
+        "bottomCat": bottomCat,
+        "topCatTitle": categories[topCat]["heTitle"] if request.interfaceLang == "hebrew" else categories[topCat]["title"],
+        "bottomCatTitle": categories[bottomCat]["heTitle"] if request.interfaceLang == "hebrew" else categories[bottomCat]["title"],
+        "urlRoot": urlRoot,
+    }
     if lang == "he": # Override language settings if 'he' is in URL
         request.contentLang = "hebrew"
 

@@ -13,7 +13,7 @@ from webpack_loader import utils as webpack_utils
 
 from django.utils.translation import ugettext as _
 from django.conf import settings
-from django.http import HttpResponse, HttpResponseRedirect
+from django.http import HttpResponse, HttpResponseRedirect, Http404
 from django.shortcuts import render, redirect
 from django.template.loader import render_to_string
 from django.template.response import TemplateResponse
@@ -27,12 +27,14 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_protect, csrf_exempt
+from django.urls import resolve
+from django.urls.exceptions import Resolver404
 
 import sefaria.model as model
 import sefaria.system.cache as scache
-from sefaria.client.util import jsonResponse, subscribe_to_list
+from sefaria.client.util import jsonResponse, subscribe_to_list, send_email
 from sefaria.forms import NewUserForm
-from sefaria.settings import MAINTENANCE_MESSAGE, USE_VARNISH, MULTISERVER_ENABLED
+from sefaria.settings import MAINTENANCE_MESSAGE, USE_VARNISH, MULTISERVER_ENABLED, relative_to_abs_path, PARTNER_GROUP_EMAIL_PATTERN_LOOKUP_FILE
 from sefaria.model.user_profile import UserProfile
 from sefaria.model.group import GroupSet
 from sefaria.model.translation_request import count_completed_translation_requests
@@ -73,6 +75,8 @@ def register(request):
             p = UserProfile(id=user.id)
             p.assign_slug()
             p.join_invited_groups()
+            if PARTNER_GROUP_EMAIL_PATTERN_LOOKUP_FILE:
+                p.add_partner_group_by_email()
             p.settings["interface_language"] = request.interfaceLang
             p.save()
             if "noredirect" in request.POST:
@@ -81,7 +85,11 @@ def register(request):
                 next = request.POST.get("next", "")
                 return HttpResponseRedirect(next)
             else:
-                next = request.POST.get("next", "/") + "?welcome=to-sefaria"
+                next = request.POST.get("next", "/")
+                if "?" in next:
+                    next += "&welcome=to-sefaria"
+                else:
+                    next += "?welcome=to-sefaria"
                 return HttpResponseRedirect(next)
     else:
         if request.GET.get('educator', ''):
@@ -120,6 +128,39 @@ def subscribe(request, email):
     else:
         return jsonResponse({"error": _("Sorry, there was an error.")})
 
+def generate_feedback(request):
+
+    data = json.loads(request.POST.get('json', {}))
+
+    fb_type = data.get('type', None)
+    refs = data.get('refs', None)
+    url = data.get('url', None)
+    versions = data.get('currVersions', None)
+    uid = data.get('uid', None)
+    from_email = data.get('email', None)
+    msg = data.get('msg', None)
+
+    if not from_email:
+        from_email = model.user_profile.UserProfile(id=uid).email
+
+    if fb_type == "content_issue":
+        to_email = "corrections@sefaria.org"
+        subject = "Correction from website - " + ' / '.join(refs)
+        message_html = msg + "\n\n" + "refs: " + ' / '.join(refs) + "\n" + "versions: " + str(versions) + "\n\n" + "URL: " + url
+    else:
+        to_email = "hello@sefaria.org"
+        subject = "Feedback from website - " + fb_type.replace("_"," ")
+        message_html = msg + "\n\n" + "URL: " + url
+
+
+
+    try:
+        send_email(subject, message_html, from_email, to_email)
+        return jsonResponse({"status": "ok"})
+    except:
+        return jsonResponse({"error": _("Sorry, there was an error.")})
+
+
 
 def data_js(request):
     """
@@ -134,7 +175,7 @@ def sefaria_js(request):
     """
     data_js = render_to_string("js/data.js",context={}, request=request)
     webpack_files = webpack_utils.get_files('main', config="SEFARIA_JS")
-    bundle_path = webpack_files[0]["path"]
+    bundle_path = relative_to_abs_path('..' + webpack_files[0]["url"])
     with open(bundle_path, 'r') as file:
         sefaria_js=file.read()
     attrs = {
@@ -145,7 +186,7 @@ def sefaria_js(request):
     return render(request,"js/sefaria.js", attrs, content_type= "text/javascript")
 
 
-def linker_js(request):
+def linker_js(request,linker_version=None):
     """
     Javascript of Linker plugin.
     """
@@ -153,7 +194,19 @@ def linker_js(request):
         "book_titles": json.dumps(model.library.citing_title_list("en")
                       + model.library.citing_title_list("he"))
     }
-    return render(request,"js/linker.js", attrs, content_type= "text/javascript")
+    linker_link = "js/linker.js" if linker_version is None else "js/linker.v"+linker_version+".js"
+
+    return render(request,linker_link, attrs, content_type= "text/javascript")
+
+def old_linker_js(request):
+    """
+    Javascript of Linker plugin.
+    """
+    attrs = {
+        "book_titles": json.dumps(model.library.citing_title_list("en")
+                      + model.library.citing_title_list("he"))
+    }
+    return render(request,"js/linker.v1.js", attrs, content_type= "text/javascript")
 
 
 def title_regex_api(request, titles):
@@ -186,23 +239,38 @@ def bulktext_api(request, refs):
     """
     if request.method == "GET":
         cb = request.GET.get("callback", None)
+        useTextFamily = request.GET.get("useTextFamily", None)
         refs = set(refs.split("|"))
         res = {}
         for tref in refs:
             try:
                 oref = model.Ref(tref)
                 lang = "he" if is_hebrew(tref) else "en"
-                he = model.TextChunk(oref, "he").text
-                en = model.TextChunk(oref, "en").text
-                res[tref] = {
-                    'he': he if isinstance(he, basestring) else JaggedTextArray(he).flatten_to_string(),  # these could be flattened on the client, if need be.
-                    'en': en if isinstance(en, basestring) else JaggedTextArray(en).flatten_to_string(),
-                    'lang': lang,
-                    'ref': oref.normal(),
-                    'heRef': oref.he_normal(),
-                    'url': oref.url()
-                }
-            except (InputError, ValueError, AttributeError) as e:
+                if useTextFamily:
+                    text_fam = model.TextFamily(oref, commentary=0, context=0, pad=False)
+                    he = text_fam.he
+                    en = text_fam.text
+                    res[tref] = {
+                        'he': he,
+                        'en': en,
+                        'lang': lang,
+                        'ref': oref.normal(),
+                        'primary_category': text_fam.contents()['primary_category'],
+                        'heRef': oref.he_normal(),
+                        'url': oref.url()
+                    }
+                else:
+                    he = model.TextChunk(oref, "he").text
+                    en = model.TextChunk(oref, "en").text
+                    res[tref] = {
+                        'he': he if isinstance(he, basestring) else JaggedTextArray(he).flatten_to_string(),  # these could be flattened on the client, if need be.
+                        'en': en if isinstance(en, basestring) else JaggedTextArray(en).flatten_to_string(),
+                        'lang': lang,
+                        'ref': oref.normal(),
+                        'heRef': oref.he_normal(),
+                        'url': oref.url()
+                    }
+            except (InputError, ValueError, AttributeError, KeyError) as e:
                 # referer = request.META.get("HTTP_REFERER", "unknown page")
                 # This chatter fills up the logs.  todo: put in it's own file
                 # logger.warning(u"Linker failed to parse {} from {} : {}".format(tref, referer, e))
@@ -271,13 +339,38 @@ def reset_index_cache_for_text(request, title):
 """@staff_member_required
 def view_cached_elem(request, title):
     return HttpResponse(get_template_cache('texts_list'), status=200)
-
+"""
 
 @staff_member_required
-def del_cached_elem(request, title):
-    delete_template_cache('texts_list')
-    toc_html = get_template_cache('texts_list')
-    return HttpResponse(toc_html, status=200)"""
+def reset_cached_api(request, apiurl):
+    """
+    This admin call gets the url of the original api that we wish to reset, backwards resolves that original function and gets its data back into cache
+    :param request:
+    :param apiurl:
+    :return:
+    """
+    from undecorated import undecorated
+    from importlib import import_module
+    try:
+        match = resolve("/api/{}".format(apiurl))
+        #mod = import_module(".".join(match.view_name.split(".")[:-1])) Dont actually need this, resolve gets us the func itself
+        #func = mod.__getattribute__(match.func.func_name)
+
+        if "django_cache" in match.func.func_dict:
+            api_view = undecorated(match.func)
+            redecorated_api_view = scache.django_cache(action="reset")(api_view)
+            redecorated_api_view(request, *match.args, **match.kwargs)
+
+            return HttpResponseRedirect("/api/{}".format(apiurl))
+        else:
+            raise Http404("API not in cache")
+
+    except Resolver404 as re:
+        logger.warn("Attempted to reset invalid url")
+        raise Http404()
+    except Exception as e:
+        logger.warn("Unable to reset cache for {}".format(apiurl))
+        raise Http404()
 
 
 @staff_member_required
@@ -325,10 +418,14 @@ def rebuild_toc(request):
 def rebuild_auto_completer(request):
     library.build_full_auto_completer()
     library.build_ref_auto_completer()
+    library.build_lexicon_auto_completers()
+    library.build_cross_lexicon_auto_completer()
 
     if MULTISERVER_ENABLED:
         server_coordinator.publish_event("library", "build_full_auto_completer")
         server_coordinator.publish_event("library", "build_ref_auto_completer")
+        server_coordinator.publish_event("library", "build_lexicon_auto_completers")
+        server_coordinator.publish_event("library", "build_cross_lexicon_auto_completer")
 
     return HttpResponseRedirect("/?m=auto-completer-Rebuilt")
 

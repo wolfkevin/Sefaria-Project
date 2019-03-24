@@ -9,7 +9,7 @@ BeautifulSoup
 bleach==1.4.2
 rauth
 elasticsearch
-pyelasticsearch
+elasticsearch_dsl
 regex
 pytest
 mailchimp
@@ -28,7 +28,7 @@ google-api-python-client
 boto3
 pillow
 datrie
-deepdiff
+deepdiff==3.3.0
 Appium-Python-Client
 django-webpack-loader
 django-anymail
@@ -37,3 +37,5 @@ ua-parser
 user-agents
 django-user-agents
 psycopg2
+django-easy-timezones
+undecorated

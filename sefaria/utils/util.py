@@ -2,9 +2,34 @@
 """
 Miscellaneous functions for Sefaria.
 """
+from datetime import datetime
 from HTMLParser import HTMLParser
 import re
+from functools import wraps
 
+epoch = datetime.utcfromtimestamp(0)
+
+
+def epoch_time(since=None):
+    if since is None:
+        since = datetime.utcnow()
+    # define total_seconds which exists in Python3
+    total_seconds = lambda delta: int(delta.days * 86400 + delta.seconds + delta.microseconds / 1e6)
+    return total_seconds(since - epoch)
+
+
+def graceful_exception(logger=None, return_value=[], exception_type=Exception):
+    def argumented_decorator(func):
+        @wraps(func)
+        def decorated_function(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except exception_type as e:
+                if logger:
+                    logger.exception(e)
+            return return_value
+        return decorated_function
+    return argumented_decorator
 
 # also at JaggedArray.depth().  Still needed?
 def list_depth(x, deep=False):

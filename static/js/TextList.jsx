@@ -5,6 +5,7 @@ const {
   RecentFilterSet,
 }                = require('./ConnectionFilters');
 const React      = require('react');
+const ReactDOM   = require('react-dom');
 const Sefaria    = require('./sefaria/sefaria');
 const PropTypes  = require('prop-types');
 const TextRange  = require('./TextRange');
@@ -35,6 +36,12 @@ class TextList extends Component {
   componentDidUpdate(prevProps, prevState) {
     if (!prevProps.srefs.compare(this.props.srefs)) {
       this.loadConnections();
+    }
+    const didRender = prevState.linksLoaded && (!prevState.waitForText || prevState.textLoaded);
+    const willRender = this.state.linksLoaded && (!this.state.waitForText || this.state.textLoaded);
+    if (!didRender && willRender) {
+      // links text just loaded 
+      this.props.checkVisibleSegments();
     }
   }
   getSectionRef() {
@@ -77,7 +84,7 @@ class TextList extends Component {
     }
   }
   preloadSingleCommentaryText(filter) {
-    console.log('preloading single commentary')
+    //console.log('preloading single commentary')
     // Preload commentary for an entire section of text.
     this.setState({textLoaded: false});
     var commentator       = filter[0];
@@ -163,15 +170,11 @@ class TextList extends Component {
       }
     }.bind(this);
 
-    var sectionLinks = Sefaria.links(sectionRef);
-    var links        = Sefaria._filterLinks(sectionLinks, filter);
-    links            = links.filter(function(link) {
-      if (Sefaria.splitRangingRef(link.anchorRef).every(aref => Sefaria.util.inArray(aref, refs) === -1)) {
-        // Filter out every link in this section which does not overlap with current refs.
-        return false;
-      }
-      return true;
-    }.bind(this)).sort(sortConnections);
+    let sectionLinks = Sefaria.links(sectionRef);
+    let overlaps = link => (!(Sefaria.splitRangingRef(link.anchorRef).every(aref => Sefaria.util.inArray(aref, refs) === -1)));
+    let links = Sefaria._filterLinks(sectionLinks, filter)
+      .filter(overlaps)
+      .sort(sortConnections);
 
     return links;
   }
@@ -191,7 +194,6 @@ class TextList extends Component {
                     (<LoadingMessage />) :
                     links.map(function(link, i) {
                         var hideTitle = link.category === "Commentary" && this.props.filter[0] !== "Commentary";
-                        Sefaria.util.inArray(link.anchorRef, refs) === -1;
                         return (<div className="textListTextRangeBox" key={i + link.sourceRef}>
                                   <TextRange
                                     panelPosition ={this.props.panelPosition}
@@ -247,6 +249,7 @@ TextList.propTypes = {
   openDisplaySettings:     PropTypes.func,
   closePanel:              PropTypes.func,
   selectedWords:           PropTypes.string,
+  checkVisibleSegments:    PropTypes.func.isRequired,
 };
 
 

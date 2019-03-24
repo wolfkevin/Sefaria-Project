@@ -24,7 +24,6 @@ from diff_match_patch import diff_match_patch
 dmp = diff_match_patch()
 
 from . import abstract as abst
-from . import text
 from sefaria.system.database import db
 
 
@@ -147,6 +146,10 @@ class History(abst.AbstractMongoRecord):
         "sheet"     # rev_type: publish sheet
     ]
 
+    def _sanitize(self):
+        # History should only ever be called internally with clean text. No need to sanitize
+        pass
+
     def pretty_print(self):
         pass
 
@@ -182,7 +185,7 @@ def process_index_title_change_in_history(indx, **kwargs):
         h.new["refs"] = [r.replace(kwargs["old"], kwargs["new"], 1) for r in h.new["refs"]]
         h.save()
 
-    note_hist = HistorySet(construct_query("new.ref", queries), sort=[{'new.ref', 1}])
+    note_hist = HistorySet(construct_query("new.ref", queries), sort=[('new.ref', 1)])
     print "Cascading Note History {} to {}".format(kwargs['old'], kwargs['new'])
     for h in note_hist:
         h.new["ref"] = h.new["ref"].replace(kwargs["old"], kwargs["new"], 1)
